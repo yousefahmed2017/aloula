@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
     <html lang="ar" dir="rtl">
     <head>
@@ -34997,8 +34996,39 @@ async function processInstallments(editIndex) {
                 window.addEventListener('load', function() {
                     navigator.serviceWorker.register('sw.js').then(function(reg) {
                         console.log('SW registered:', reg.scope);
+
+                        // ✅ فيه نسخة أحدث اتسجلت (ديبلوى جديد) — بلّغ المستخدم بدل ما يفضل
+                        // شغال بنسخة قديمة من الكاش لحد ما يعمل hard refresh يدوى
+                        reg.addEventListener('updatefound', function() {
+                            var installingWorker = reg.installing;
+                            if (!installingWorker) return;
+                            installingWorker.addEventListener('statechange', function() {
+                                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    try {
+                                        showSyncMismatchBanner(
+                                            'فيه إصدار جديد من التطبيق (ديبلوى حديث). اللى شايفه دلوقتى ممكن يكون من نسخة قديمة محفوظة (كاش).',
+                                            'تحديث الآن',
+                                            function(){ location.reload(); }
+                                        );
+                                    } catch(e) { console.warn('update banner:', e); }
+                                }
+                            });
+                        });
+
+                        // فحص دورى لو فيه نسخة sw.js جديدة على السيرفر (كل 60 ثانية)
+                        setInterval(function(){ reg.update(); }, 60000);
                     }).catch(function(err) {
                         console.log('SW registration failed:', err);
+                    });
+
+                    // ✅ لو الـ sw.js الجديد بينادى skipWaiting()+clients.claim() (لو اتعدّل)
+                    // نعمل reload تلقائى واحد بس لتفادى لوب — يشتغل تلقائى بمجرد
+                    // تحديث sw.js بالإصلاح الموصى بيه، من غير أى تعديل تانى هنا.
+                    var _swReloading = false;
+                    navigator.serviceWorker.addEventListener('controllerchange', function() {
+                        if (_swReloading) return;
+                        _swReloading = true;
+                        location.reload();
                     });
                 });
             }
@@ -41944,6 +41974,104 @@ async function processInstallments(editIndex) {
             }
             window.v10PushMerged = v10PushMerged;
 
+            // ✅ بانر بسيط لتنبيه المستخدم عند وجود فرق بين الكاش/القرص والسحابة الحقيقية
+            // (بديل عن الدمج الصامت اللى كان بيحصل من غير ما حد يعرف)
+            function showSyncMismatchBanner(message, actionLabel, onAction) {
+                try {
+                    var old = document.getElementById('sync-mismatch-banner');
+                    if (old) old.remove();
+                    var b = document.createElement('div');
+                    b.id = 'sync-mismatch-banner';
+                    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#fff3cd;color:#664d03;border-bottom:2px solid #ffca2c;padding:10px 16px;text-align:center;font-family:Cairo,sans-serif;font-size:14px;display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 2px 6px rgba(0,0,0,.15);';
+                    var span = document.createElement('span');
+                    span.textContent = '⚠️ ' + message;
+                    b.appendChild(span);
+                    if (actionLabel && onAction) {
+                        var btn = document.createElement('button');
+                        btn.textContent = actionLabel;
+                        btn.style.cssText = 'padding:6px 14px;background:#664d03;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:Cairo,sans-serif;font-size:13px;';
+                        btn.onclick = function() { try { onAction(); } catch(e){} b.remove(); };
+                        b.appendChild(btn);
+                    }
+                    var closeBtn = document.createElement('button');
+                    closeBtn.textContent = '✕';
+                    closeBtn.title = 'إغلاق';
+                    closeBtn.style.cssText = 'background:none;border:none;color:#664d03;cursor:pointer;font-size:16px;padding:0 4px;';
+                    closeBtn.onclick = function() { b.remove(); };
+                    b.appendChild(closeBtn);
+                    document.body.appendChild(b);
+                } catch(e) { console.warn('showSyncMismatchBanner:', e); }
+            }
+            window.showSyncMismatchBanner = showSyncMismatchBanner;
+
+            // ══════════════════════════════════════════════════════════════
+            // 📋 تسجيل تلقائى لكل كتابة على السحابة (Supabase) — مين وامتى وإيه اللي اتغيّر
+            // تعديل جراحى: نغلّف cloudSet/cloudGet الأصليين بس (بدون تغيير جسمهم)
+            // ونستخدم logAudit الموجودة أصلاً (بتترفع للسحابة تلقائى ضمن meta)
+            // ══════════════════════════════════════════════════════════════
+            var _cloudWriteBaseline = {}; // آخر قيمة معروفة لكل مفتاح فى الجلسة دى — لحساب الفرق
+
+            function _cloudDiffSummary(oldVal, newVal) {
+                try {
+                    if (oldVal === undefined) return '🆕 أول تسجيل لهذا المفتاح فى الجلسة الحالية';
+                    if (newVal === null) return '🗑️ حذف كامل للمفتاح';
+                    if (oldVal === null || typeof oldVal !== 'object' || typeof newVal !== 'object') {
+                        return String(oldVal) + '  ←  ' + String(newVal);
+                    }
+                    if (Array.isArray(newVal)) {
+                        var oldLen = Array.isArray(oldVal) ? oldVal.length : 0;
+                        return 'عدد العناصر: ' + oldLen + '  ←  ' + newVal.length;
+                    }
+                    var parts = [];
+                    var keys = {};
+                    Object.keys(oldVal || {}).forEach(function(k){ keys[k] = 1; });
+                    Object.keys(newVal || {}).forEach(function(k){ keys[k] = 1; });
+                    Object.keys(keys).forEach(function(k) {
+                        var a = JSON.stringify((oldVal || {})[k]);
+                        var b = JSON.stringify((newVal || {})[k]);
+                        if (a === b) return;
+                        var av = (a === undefined) ? '—' : String((oldVal || {})[k]);
+                        var bv = (b === undefined) ? '—' : String((newVal || {})[k]);
+                        if (av.length > 40) av = av.slice(0, 40) + '…';
+                        if (bv.length > 40) bv = bv.slice(0, 40) + '…';
+                        parts.push(k + ': ' + av + '  ←  ' + bv);
+                    });
+                    return parts.length ? parts.join(' | ') : '';
+                } catch(e) { return 'تعذّر حساب الفرق بدقة'; }
+            }
+
+            var cloudSetV95 = cloudSet;
+            cloudSet = async function(key, value, retries) {
+                var hadBaseline = _cloudWriteBaseline.hasOwnProperty(key);
+                var oldVal = hadBaseline ? _cloudWriteBaseline[key] : undefined;
+                var ok = await cloudSetV95(key, value, retries);
+                if (ok) {
+                    var diff = _cloudDiffSummary(oldVal, value);
+                    _cloudWriteBaseline[key] = value;
+                    if (diff) {
+                        try {
+                            logAudit(
+                                'كتابة_سحابة',
+                                key,
+                                diff,
+                                { key: key, exactTime: new Date().toISOString(),
+                                  user: currentUserName || currentUser || 'unknown' }
+                            );
+                        } catch(e) { console.warn('cloud-write audit log:', e); }
+                    }
+                }
+                return ok;
+            };
+            window.cloudSet = cloudSet;
+
+            var cloudGetV95 = cloudGet;
+            cloudGet = async function(key, retries) {
+                var val = await cloudGetV95(key, retries);
+                if (val !== null && val !== undefined) _cloudWriteBaseline[key] = val;
+                return val;
+            };
+            window.cloudGet = cloudGet;
+
             // ✅ نقطة الحفظ الموحّدة — تُستدعى بعد أى عملية على العملاء أو المستثمرين
             var _v10PersistTimer = null;
             function persistAll(reason) {
@@ -42074,7 +42202,26 @@ async function processInstallments(editIndex) {
                 var res = null;
                 try { res = await initializeDataV94(); } catch(e) { console.warn('initializeData:', e); }
                 try {
-                    await v10PullAndMerge(true);                   // ادمج المحلى مع البعيد
+                    // ✅ فحص قبل الدمج (بدل الدمج الصامت القديم):
+                    // السحابة الحقيقية هى مصدر الحقيقة بعد initializeDataV94 أعلاه.
+                    // نتأكد أولاً هل ملف السحابة المحلية (القرص) فيه فعلاً تعديلات أحدث
+                    // لم تصل للسحابة بعد — لو آه، ندمجها ونبلّغ المستخدم بوضوح.
+                    // لو لأ (القرص قديم/مطابق) نتخطى الدمج تماماً بدل ما نخلط كاش قديم
+                    // فوق بيانات السحابة الطازة بصمت — وده أصل مشكلة "البيانات القديمة اللى بتظهر".
+                    var _diskSnap = await v10ReadDisk();
+                    var _cloudTime = localLastModified ? new Date(localLastModified).getTime() : 0;
+                    var _diskTime  = (_diskSnap && _diskSnap.savedAt) ? new Date(_diskSnap.savedAt).getTime() : 0;
+
+                    if (_diskSnap && _diskTime > _cloudTime + 5000) {
+                        await v10PullAndMerge(true);
+                        showSyncMismatchBanner(
+                            'فيه تعديلات محلية (سحابة محلية على هذا الجهاز) أحدث من آخر نسخة وصلت للسحابة، وتم دمجها الآن. تأكد إن الاتصال بالسحابة شغال عشان تترفع.',
+                            'تحديث الصفحة',
+                            function(){ location.reload(); }
+                        );
+                    } else if (_diskSnap) {
+                        console.log('☁️ v10: تخطّى دمج ملف القرص — نسخة السحابة الحقيقية أحدث أو مطابقة، لا داعى لدمج كاش قديم بصمت.');
+                    }
                     if (typeof _lcMigrateAllLegacy === 'function')  _lcMigrateAllLegacy();
                     if (typeof _lcSyncInvestorTreasury === 'function') _lcSyncInvestorTreasury();
                     await v10PushMerged();                         // اكتب اللقطة الموحّدة
