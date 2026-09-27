@@ -24128,6 +24128,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
             }
 
             function _showLocalCloudReconnectBanner() {
+            return;
                 if (document.getElementById('localCloudReconnectBar')) return;
                 var bar = document.createElement('div');
                 bar.id = 'localCloudReconnectBar';
@@ -30330,6 +30331,7 @@ async function processInstallments(editIndex) {
                     var bal = calculateInvestorBalance(invName);
                     var txs = getInvestorTransactions(invName);
                     var ws = wb.addWorksheet(invName.substring(0, 31));
+                    ws.views = [{ rightToLeft: true }];
 
                     ws.columns = [
                         { header: 'التاريخ', key: 'date', width: 15 },
@@ -30340,6 +30342,8 @@ async function processInstallments(editIndex) {
                         { header: 'رقم المرجع', key: 'refNumber', width: 15 },
                         { header: 'البيان', key: 'note', width: 30 }
                     ];
+                    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
 
                     ws.addRow({});
                     var summaryRow = ws.addRow({
@@ -30370,12 +30374,15 @@ async function processInstallments(editIndex) {
                 });
 
                 var summaryWs = wb.addWorksheet('ملخص عام');
+                summaryWs.views = [{ rightToLeft: true }];
                 summaryWs.columns = [
                     { header: 'اسم المستثمر', key: 'name', width: 30 },
                     { header: 'إجمالي الإيداعات', key: 'deposits', width: 20 },
                     { header: 'إجمالي السحوبات', key: 'withdrawals', width: 20 },
                     { header: 'الرصيد الحالي', key: 'balance', width: 20 }
                 ];
+                summaryWs.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                summaryWs.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
 
                 var totalDeposits = 0, totalWithdrawals = 0, totalBalance = 0;
                 investors.forEach(function(invName) {
@@ -32867,7 +32874,7 @@ async function processInstallments(editIndex) {
                 var todayAr  = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
                 var todayNum = new Date().toLocaleDateString('ar-EG');
                 var RED='FF8B1A1A', WHITE='FFFFFFFF', CREAM='FFFFF8E1', RED_TEXT='FF6B0D0D';
-                var PURPLE='FF6C3483', PURPLE_L='FFF3E5F5', GRAY_BG='FFF5F5F5', DARK='FF2C3E50';
+                var PURPLE='FF6B0D0D', PURPLE_L='FFF3E5F5', GRAY_BG='FFF5F5F5', DARK='FF2C3E50';
 
                 // ألوان الأنواع
                 var actionColors = {
@@ -32918,7 +32925,7 @@ async function processInstallments(editIndex) {
                     cell.font  = {bold:true, size:11, color:{argb:WHITE}, name:'Cairo'};
                     cell.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:PURPLE}};
                     cell.alignment = {horizontal:'center', vertical:'middle'};
-                    cell.border = {bottom:{style:'medium', color:{argb:'FFB39DDB'}}};
+                    cell.border = {bottom:{style:'medium', color:{argb:'FF6B0D0D'}}};
                 });
 
                 // ── البيانات ──
@@ -35933,7 +35940,7 @@ async function processInstallments(editIndex) {
                 var todayAr  = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
                 var todayNum = new Date().toLocaleDateString('ar-EG');
                 var RED='FF8B1A1A', WHITE='FFFFFFFF', CREAM='FFFFF8E1', RED_TEXT='FF6B0D0D';
-                var GRAY_BG='FFF5F5F5', DARK='FF2C3E50', PURPLE='FF9B59B6', PURPLE_LIGHT='FFF3E5F5';
+                var GRAY_BG='FFF5F5F5', DARK='FF2C3E50', PURPLE='FF6B0D0D', PURPLE_LIGHT='FFF3E5F5';
 
                 // تطبيق فلاتر المحفظة
                 var filterFrom = (document.getElementById('ext-from') || {}).value || '';
@@ -36564,7 +36571,7 @@ async function processInstallments(editIndex) {
                     var titleCell = ws.getCell('A1');
                     titleCell.value = 'بيانات المستثمر: ' + inv.name;
                     titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6A11CB' } };
+                    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
                     ws.getRow(1).height = 30;
 
@@ -36573,7 +36580,7 @@ async function processInstallments(editIndex) {
                     ws.getCell('A3').value = 'البيان';
                     ws.getCell('B3').value = 'القيمة';
                     ws.getRow(3).font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    ws.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A0E8F' } };
+                    ws.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     ws.getRow(3).alignment = { vertical: 'middle', horizontal: 'center' };
 
                     ws.addRow(['اسم المستثمر', inv.name]);
@@ -36692,7 +36699,7 @@ async function processInstallments(editIndex) {
                     var titleCell = wsAll.getCell('A1');
                     titleCell.value = 'مستثمري عمارة ' + buildingName;
                     titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6A11CB' } };
+                    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
                     wsAll.getRow(1).height = 30;
 
@@ -36700,7 +36707,7 @@ async function processInstallments(editIndex) {
                     wsAll.addRow(['الاسم', 'قيمة الاستثمار', 'نسبة الاستثمار', 'نسبة الأرباح', 'تاريخ الانضمام', 'المرحلة', 'إجمالي المدفوعات', 'المستحق الآن', 'المتبقي']);
                     var headerRow = wsAll.getRow(2);
                     headerRow.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A0E8F' } };
+                    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow.height = 25;
 
@@ -36768,7 +36775,7 @@ async function processInstallments(editIndex) {
                         var titleCellSingle = wsSingle.getCell('A1');
                         titleCellSingle.value = 'بيانات المستثمر: ' + inv.name;
                         titleCellSingle.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                        titleCellSingle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6A11CB' } };
+                        titleCellSingle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                         titleCellSingle.alignment = { vertical: 'middle', horizontal: 'center' };
                         wsSingle.getRow(1).height = 30;
 
@@ -36777,7 +36784,7 @@ async function processInstallments(editIndex) {
                         wsSingle.getCell('A3').value = 'البيان';
                         wsSingle.getCell('B3').value = 'القيمة';
                         wsSingle.getRow(3).font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                        wsSingle.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A0E8F' } };
+                        wsSingle.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                         wsSingle.getRow(3).alignment = { vertical: 'middle', horizontal: 'center' };
 
                         wsSingle.addRow(['اسم المستثمر', inv.name]);
@@ -36889,7 +36896,7 @@ async function processInstallments(editIndex) {
                     wsCustomers.addRow(['الاسم', 'الوحدة', 'إجمالي العقد', 'المقدم', 'المسدد', 'المتبقي', 'الحالة']);
                     var headerRow = wsCustomers.getRow(2);
                     headerRow.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0F0F' } };
+                    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow.height = 25;
 
@@ -36946,14 +36953,14 @@ async function processInstallments(editIndex) {
                     var titleCell2 = wsCollections.getCell('A1');
                     titleCell2.value = 'تحصيلات عمارة ' + buildingName;
                     titleCell2.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27AE60' } };
+                    titleCell2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell2.alignment = { vertical: 'middle', horizontal: 'center' };
                     wsCollections.getRow(1).height = 30;
 
                     wsCollections.addRow(['التاريخ', 'اسم العميل', 'الوحدة', 'المبلغ', 'النوع', 'ملاحظات']);
                     var headerRow2 = wsCollections.getRow(2);
                     headerRow2.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E8449' } };
+                    headerRow2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow2.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow2.height = 25;
 
@@ -37000,14 +37007,14 @@ async function processInstallments(editIndex) {
                     var titleCell3 = wsInvestors.getCell('A1');
                     titleCell3.value = 'مستثمري عمارة ' + buildingName;
                     titleCell3.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6A11CB' } };
+                    titleCell3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell3.alignment = { vertical: 'middle', horizontal: 'center' };
                     wsInvestors.getRow(1).height = 30;
 
                     wsInvestors.addRow(['الاسم', 'قيمة الاستثمار', 'نسبة الاستثمار', 'نسبة الأرباح', 'تاريخ الانضمام', 'المرحلة', 'إجمالي المدفوعات']);
                     var headerRow3 = wsInvestors.getRow(2);
                     headerRow3.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A0E8F' } };
+                    headerRow3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow3.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow3.height = 25;
 
@@ -37068,14 +37075,14 @@ async function processInstallments(editIndex) {
                     var titleCell4 = wsExpenses.getCell('A1');
                     titleCell4.value = 'مصروفات عمارة ' + buildingName;
                     titleCell4.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE74C3C' } };
+                    titleCell4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell4.alignment = { vertical: 'middle', horizontal: 'center' };
                     wsExpenses.getRow(1).height = 30;
 
                     wsExpenses.addRow(['التاريخ', 'الوصف', 'المبلغ', 'الفئة', 'ملاحظات']);
                     var headerRow4 = wsExpenses.getRow(2);
                     headerRow4.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0392B' } };
+                    headerRow4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow4.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow4.height = 25;
 
@@ -37119,14 +37126,14 @@ async function processInstallments(editIndex) {
                     var titleCell5 = wsNotes.getCell('A1');
                     titleCell5.value = 'ملحوظات عمارة ' + buildingName;
                     titleCell5.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
-                    titleCell5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF9800' } };
+                    titleCell5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
                     titleCell5.alignment = { vertical: 'middle', horizontal: 'center' };
                     wsNotes.getRow(1).height = 30;
 
                     wsNotes.addRow(['التاريخ', 'العنوان', 'الملاحظة']);
                     var headerRow5 = wsNotes.getRow(2);
                     headerRow5.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
-                    headerRow5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF57C00' } };
+                    headerRow5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     headerRow5.alignment = { vertical: 'middle', horizontal: 'center' };
                     headerRow5.height = 25;
 
@@ -38326,6 +38333,7 @@ async function processInstallments(editIndex) {
                     (distributionRows ? '<table><thead><tr><th>البند</th><th>المبلغ</th></tr></thead><tbody>' + distributionRows + '</tbody></table>' : '') +
                     '<div class="total">إجمالي المبلغ المحصّل: ' + col.amount.toLocaleString() + ' جنيه</div>' +
                     (col.receiptNotes ? '<div style="margin-top:10px;padding:8px;background:#f5f5f5;border-radius:8px;font-size:12px;"><strong>📝 ملاحظات الاستلام:</strong> ' + col.receiptNotes + '</div>' : '') +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:18px;text-align:center;font-size:12px;color:#666;border-top:1px dashed #ddd;padding-top:12px;"><div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>' +
                     '<div style="text-align:center;margin-top:15px;font-size:11px;color:#999;">تم الإصدار إلكترونياً — نظام الأولى للتطوير العقاري</div>' +
                     '</div><script>window.onload=function(){window.print();}<' + '/script></body></html>';
 
@@ -38347,7 +38355,8 @@ async function processInstallments(editIndex) {
                     (pa.wallets || []).forEach(function(a) {
                         ws1.addRow([a.name, a.provider || '-', a.holderName || '-', a.phone || '-', a.notes || '-', getAccountCollectedTotal(a.id)]);
                     });
-                    ws1.getRow(1).font = { bold: true };
+                    ws1.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                    ws1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
 
                     var ws2 = wb.addWorksheet('الحسابات البنكية');
                     ws2.views = [{ rightToLeft: true }];
@@ -38355,7 +38364,8 @@ async function processInstallments(editIndex) {
                     (pa.banks || []).forEach(function(a) {
                         ws2.addRow([a.name, a.bankName || '-', a.accountHolderName || '-', a.accountNumber || '-', a.accountType || '-', a.notes || '-', getAccountCollectedTotal(a.id)]);
                     });
-                    ws2.getRow(1).font = { bold: true };
+                    ws2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                    ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1A1A' } };
 
                     var buffer = await wb.xlsx.writeBuffer();
                     var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -38383,6 +38393,7 @@ async function processInstallments(editIndex) {
                     '<div class="row"><span>التاريخ</span><strong>' + exp.date + '</strong></div>' +
                     '<div class="total">إجمالي مبلغ الصرف: ' + exp.amount.toLocaleString() + ' جنيه</div>' +
                     (exp.authNotes ? '<div style="margin-top:10px;padding:8px;background:#f5f5f5;border-radius:8px;font-size:12px;"><strong>📝 ملاحظات الصرف:</strong> ' + exp.authNotes + '</div>' : '') +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:18px;text-align:center;font-size:12px;color:#666;border-top:1px dashed #ddd;padding-top:12px;"><div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>' +
                     '<div style="text-align:center;margin-top:15px;font-size:11px;color:#999;">تم الإصدار إلكترونياً — نظام الأولى للتطوير العقاري</div>' +
                     '</div><script>window.onload=function(){window.print();}<' + '/script></body></html>';
 
@@ -38419,6 +38430,10 @@ async function processInstallments(editIndex) {
                         row.getCell(1).font = { bold: true };
                     });
                     ws.getColumn(1).width = 22; ws.getColumn(2).width = 35;
+
+                    ws.addRow([]);
+                    var sigRow = ws.addRow(['الموظف المختص', 'ختم الشركة', 'المدير']);
+                    sigRow.eachCell(function(c) { c.font = { bold: true }; c.alignment = { horizontal: 'center' }; });
 
                     var buffer = await wb.xlsx.writeBuffer();
                     var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -38471,6 +38486,10 @@ async function processInstallments(editIndex) {
                             ws.addRow([inst ? inst.t : 'قسط', ap.amount]);
                         });
                     }
+
+                    ws.addRow([]);
+                    var sigRow = ws.addRow(['الموظف المختص', 'ختم الشركة', 'المدير']);
+                    sigRow.eachCell(function(c) { c.font = { bold: true }; c.alignment = { horizontal: 'center' }; });
 
                     var buffer = await wb.xlsx.writeBuffer();
                     var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -39250,12 +39269,12 @@ async function processInstallments(editIndex) {
                     '</div>';
 
                 html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:15px;text-align:center;font-size:12px;color:#666;">' +
-                    '<div>المحاسب</div><div>المدير المباشر</div><div>المستلم</div></div>';
+                    '<div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>';
 
                 setMainContent(html);
             }
 
-            // تصدير الكشف Excel بنفس الهوية البصرية لسندات الشركة (خلفية داكنة FF222B35 + Arial 12 + تقسيم بند نقدًا/بنكي)
+            // تصدير الكشف Excel بنفس الهوية البصرية لسندات الشركة (أحمر غامق FF6B0D0D + Arial 12 + تقسيم بند نقدًا/بنكي)
             async function exportOwnerStatementExcel(investmentId, fromDate, toDate) {
                 try {
                     var investment = appData.investorInvestments.find(function(inv) { return inv._id === investmentId; });
@@ -39267,7 +39286,7 @@ async function processInstallments(editIndex) {
                     var ws = wb.addWorksheet('كشف حساب مالك');
                     ws.views = [{ rightToLeft: true }];
 
-                    var darkFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF222B35' } };
+                    var darkFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B0D0D' } };
                     var whiteBold = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
                     var whiteReg = { name: 'Arial', size: 12, bold: false, color: { argb: 'FFFFFFFF' } };
                     var blackBold = { name: 'Arial', size: 12, bold: true };
@@ -39355,11 +39374,11 @@ async function processInstallments(editIndex) {
                     addSection('بنكي', data.bankRows);
 
                     rowPtr++;
-                    ws.mergeCells('A' + rowPtr + ':B' + rowPtr); ws.getCell('A' + rowPtr).value = 'المحاسب';
+                    ws.mergeCells('A' + rowPtr + ':B' + rowPtr); ws.getCell('A' + rowPtr).value = 'الموظف المختص';
                     ws.getCell('A' + rowPtr).font = blackBold; ws.getCell('A' + rowPtr).alignment = center;
-                    ws.mergeCells('C' + rowPtr + ':F' + rowPtr); ws.getCell('C' + rowPtr).value = 'المدير المباشر';
+                    ws.mergeCells('C' + rowPtr + ':F' + rowPtr); ws.getCell('C' + rowPtr).value = 'ختم الشركة';
                     ws.getCell('C' + rowPtr).font = blackBold; ws.getCell('C' + rowPtr).alignment = center;
-                    ws.mergeCells('G' + rowPtr + ':H' + rowPtr); ws.getCell('G' + rowPtr).value = 'المستلم';
+                    ws.mergeCells('G' + rowPtr + ':H' + rowPtr); ws.getCell('G' + rowPtr).value = 'المدير';
                     ws.getCell('G' + rowPtr).font = blackBold; ws.getCell('G' + rowPtr).alignment = center;
 
                     ws.columns = [{ width: 8 }, { width: 28.88 }, { width: 14.44 }, { width: 15.44 }, { width: 25.22 }, { width: 21.89 }, { width: 17.33 }, { width: 22.22 }];
@@ -39549,7 +39568,7 @@ async function processInstallments(editIndex) {
                     '</div>';
 
                 html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:15px;text-align:center;font-size:12px;color:#666;">' +
-                    '<div>المحاسب</div><div>المدير المباشر</div><div>المستلم</div></div>';
+                    '<div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>';
 
                 setMainContent(html);
             }
@@ -39711,7 +39730,7 @@ async function processInstallments(editIndex) {
                 html += _ovSectionTableHtml('بنكي', tx.rows ? tx.rows.bank : []);
 
                 html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:15px;text-align:center;font-size:12px;color:#666;">' +
-                    '<div>المحاسب</div><div>المدير المباشر</div><div>المستلم</div></div>';
+                    '<div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>';
 
                 setMainContent(html);
             }
@@ -39859,11 +39878,11 @@ async function processInstallments(editIndex) {
                     addSection('بنكي', tx.rows ? tx.rows.bank : []);
 
                     rowPtr++;
-                    ws.mergeCells('A' + rowPtr + ':B' + rowPtr); ws.getCell('A' + rowPtr).value = 'المحاسب';
+                    ws.mergeCells('A' + rowPtr + ':B' + rowPtr); ws.getCell('A' + rowPtr).value = 'الموظف المختص';
                     ws.getCell('A' + rowPtr).font = dkredBold; ws.getCell('A' + rowPtr).alignment = center;
-                    ws.mergeCells('C' + rowPtr + ':F' + rowPtr); ws.getCell('C' + rowPtr).value = 'المدير المباشر';
+                    ws.mergeCells('C' + rowPtr + ':F' + rowPtr); ws.getCell('C' + rowPtr).value = 'ختم الشركة';
                     ws.getCell('C' + rowPtr).font = dkredBold; ws.getCell('C' + rowPtr).alignment = center;
-                    ws.mergeCells('G' + rowPtr + ':H' + rowPtr); ws.getCell('G' + rowPtr).value = 'المستلم';
+                    ws.mergeCells('G' + rowPtr + ':H' + rowPtr); ws.getCell('G' + rowPtr).value = 'المدير';
                     ws.getCell('G' + rowPtr).font = dkredBold; ws.getCell('G' + rowPtr).alignment = center;
 
                     ws.columns = [{ width: 8 }, { width: 28.88 }, { width: 14.44 }, { width: 15.44 }, { width: 25.22 }, { width: 21.89 }, { width: 17.33 }, { width: 22.22 }];
@@ -41558,6 +41577,7 @@ async function processInstallments(editIndex) {
                     '<div style="background:#f5f5f5;padding:10px;border-radius:6px;">' +
                     '<strong>📝 البيان:</strong><br>' + (tx.note || '—') +
                     '</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:15px;text-align:center;font-size:12px;color:#666;border-top:1px dashed #ddd;padding-top:12px;"><div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:15px;">' +
                     '<button onclick="window.print()" style="padding:10px;background:#3498db;color:white;border:none;border-radius:6px;cursor:pointer;">🖨️ طباعة</button>' +
                     '<button onclick="renderInvestorsTreasuryTab()" style="padding:10px;background:#999;color:white;border:none;border-radius:6px;cursor:pointer;">إغلاق</button>' +
@@ -41595,6 +41615,7 @@ async function processInstallments(editIndex) {
                     '<div style="background:#f5f5f5;padding:10px;border-radius:6px;margin-bottom:15px;">' +
                     '<strong>📝 البيان:</strong><br>' + (tx.reason || '—') +
                     '</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:15px;text-align:center;font-size:12px;color:#666;border-top:1px dashed #ddd;padding-top:12px;"><div>الموظف المختص</div><div>ختم الشركة</div><div>المدير</div></div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
                     '<button onclick="window.print()" style="padding:10px;background:#3498db;color:white;border:none;border-radius:6px;cursor:pointer;">🖨️ طباعة</button>' +
                     '<button onclick="showInvestmentTransactions(\'' + _esc(tx.investmentId) + '\')" style="padding:10px;background:#999;color:white;border:none;border-radius:6px;cursor:pointer;">إغلاق</button>' +
