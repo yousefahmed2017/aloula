@@ -11,7 +11,7 @@
         <meta name="description" content="نظام إدارة عقارات شركة الأولى">
         <link rel="manifest" href="manifest.json">
         <link rel="apple-touch-icon" href="icon-192.png">
-        <title>الأولى للتطوير العقاري — v12</title>
+        <title>الأولى للتطوير العقاري</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
@@ -23744,6 +23744,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
             <div id="tree-container" style="display:none;"></div>
         </div>
 
+        <script src="/client-config.js"></script>
         <script>
             let currentUser = null; // لا يوجد مستخدم مسجل عند بدء التطبيق
             let currentUserName = null; // اسم المستخدم الحالي
@@ -23798,8 +23799,8 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
             // ── إعدادات الخادم الداخلي (On-Premise Backend) ──────────────
             // v83 — يعمل حاليًا على سحابة سوبابيز (Supabase) بوصفها مصدر الحقيقة الوحيد للتحميل/التعديل/الحفظ،
             // لحد ما يتم تشغيل سيرفر الشركة الداخلي (Dell R730) مستقبلًا ليحل محلها بنفس الدور.
-            var API_BASE_URL = 'https://rvrqrwnnpevjrnxfwifg.supabase.co';                 // رابط الـ backend الحالي (سوبابيز) — سيُستبدل مستقبلًا برابط سيرفر ديل عند جاهزيته
-            var API_TOKEN    = sessionStorage.getItem('al_oula_token') || 'sb_publishable_afnXlraBkzbl98Cujfov9w_NBYkSSUm'; // JWT من تسجيل الدخول، لا يُخزَّن بالكود — TEMP fallback: مفتاح سوبابيز
+            var API_BASE_URL = (location.protocol === 'file:' ? 'http://localhost:8787' : location.origin); // v88: سيرفر Dell (نفس الأصل)                 // رابط الـ backend الحالي (سوبابيز) — سيُستبدل مستقبلًا برابط سيرفر ديل عند جاهزيته
+            var API_TOKEN    = window.__ALOULA_READ_KEY__ || ''; // v88: مفتاح القراءة من /client-config.js؛ مفتاح الأدمن يُدخل بعد لوجن الأدمن فقط // JWT من تسجيل الدخول، لا يُخزَّن بالكود — TEMP fallback: مفتاح سوبابيز
             var API_TABLE    = 'al_oula_store';
 
             // للتوافق مع الكود القديم
@@ -24551,7 +24552,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                         clearTimeout(timeout);
                         if (!response.ok) {
                             if (attempt < retries) { await new Promise(function(r){ setTimeout(r, 1000 * attempt); }); continue; }
-                            return null;
+                            return _v88Fail(key, 'HTTP ' + response.status);
                         }
                         const rows = await response.json();
                         if (!rows || !rows.length) return null;
@@ -24559,7 +24560,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                     } catch(e) {
                         console.warn('cloudGet attempt ' + attempt + ' failed for key:', key, e.message);
                         if (attempt < retries) { await new Promise(function(r){ setTimeout(r, 1000 * attempt); }); }
-                        else return null;
+                        else return _v88Fail(key, e.message);
                     }
                 }
                 return null;
@@ -24696,11 +24697,15 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                         if (result.collections.length < collectionIds.length)
                             console.warn('⚠️ تحصيلات ناقصة: ' + (collectionIds.length - result.collections.length) + ' سجل لم يُجلب');
 
+                        window._v88Missing = Math.max(0, regionIds.length - result.regions.length) + Math.max(0, customerIds.length - result.customers.length) + Math.max(0, expenseIds.length - result.expenses.length) + Math.max(0, extExpIds.length - result.externalExpenses.length) + Math.max(0, collectionIds.length - result.collections.length) + Math.max(0, investorProfileIds.length - result.investorProfiles.length) + Math.max(0, investorInvestmentIds.length - result.investorInvestments.length) + Math.max(0, investmentTransactionIds.length - result.investmentTransactions.length); // v88
+                        _v88Loaded(); // v88: اكتمل تحميل السحابة
                         return result;
 
                     } else {
                         // ── الخادم الداخلي: السحابة فارغة أو بيانات جديدة ──
+                        if (meta) throw new Error('صيغة بيانات السحابة غير معروفة (meta.version=' + meta.version + ') — أُوقف التحميل حمايةً للبيانات'); // v88
                         console.log('☁️ الخادم الداخلي: لا توجد بيانات سابقة — مشروع جديد');
+                        _v88Loaded(); // v88: السيرفر أكّد فعلاً أنه فارغ
                         return null;
                     }
                 } catch (error) {
@@ -24742,7 +24747,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                     return meta || {};
                 } catch (e) {
                     console.warn('⚠️ تعذّر جلب meta الحالية من السحابة، هنعتمد على النسخة المحلية فقط:', e.message);
-                    return {};
+                    throw e; // v88: لا نكمل الحفظ على meta فارغة وهمية
                 }
             }
 
@@ -24826,7 +24831,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                         var batch = queueKeys.slice(bi, bi + batchSize);
                         var batchResults = await Promise.all(batch.map(function(qk) {
                             var change = _deltaQueue[qk];
-                            var key = 'sahab_' + change.type + '_' + change.id;
+                            var key = _cloudKeyFor(change.type, change.id); // v88: نفس مفتاح التحميل (كان sahab_ فيضيع)
                             return (change.deleted ? cloudSet(key, null) : cloudSet(key, change.data))
                                 .then(function(ok) { return { qk: qk, ok: ok }; });
                         }));
@@ -24857,7 +24862,7 @@ body{grid-template-columns:minmax(0,1fr) 300px!important;grid-template-rows:minm
                     }
 
                     const meta = buildMergedMeta(cloudMetaLatest, now, auditLog, buildingNotes, deletedByType);
-                    await cloudSet('al_oula_meta', meta);
+                    if (!(await cloudSet('al_oula_meta', meta))) throw new Error('فشل حفظ فهرس البيانات (meta) على السيرفر — لم يُعتبر الحفظ ناجحاً'); // v88
 
                     if (failedKeys.length === 0) _deltaQueue = {};
 
@@ -33242,7 +33247,7 @@ async function processInstallments(editIndex) {
                             updateCloudStatus('🔵 جاهز للمزامنة', 'ready', 0);
                         }, 2000);
 
-                        alert('✅ تم تحميل أحدث البيانات بنجاح!\n\n📦 البيانات المستعادة:\n- المناطق والعمارات\n- العملاء والتحصيلات\n- المصروفات\n- بيانات المستثمرين (' + buildingNames.length + ' عمارة)\n- ملحوظات العمارات\n- سجل الأحداث');
+                        alert('✅ تم التحميل: ' + appData.customers.length + ' عميل، ' + appData.regions.length + ' منطقة');
                     } else {
                         updateCloudStatus('❌ لا توجد بيانات', 'error', 0);
                         alert('❌ لم يتم العثور على بيانات في السحابة');
@@ -44402,43 +44407,169 @@ async function processInstallments(editIndex) {
             })();
 
         
-
             /* ══════════════════════════════════════════════════════════════════
-               🛠️ v88 — إصلاح جذري للتحميل/الحفظ السحابي (إضافة تراكمية فقط)
+               🖥️ v88 — سيرفر Dell كأساس وحيد + بوابة جاهزية قبل اللوجن + منع الفقد الصامت
                ─────────────────────────────────────────────────────────────────
-               ① مفاتيح الحفظ (sahab_<type>_<id>) لم تكن تطابق مفاتيح التحميل
-                  (al_oula_<type>_<id>) → التحميل يرجّع فاضى ويمسح appData.
-                  الآن: التحميل يجرّب sahab_ أولاً ثم القديم، ويحمّل الخزينة.
-               ② حارس: لو السحابة فيها سجلات ولم يُجلب أى سجل → خطأ صريح،
-                  لا مسح للبيانات ولا للكاش. والسجل الناقص يُسترد من الكاش المحلى.
-               ③ saveToCloud: يمسح من الطابور المرفوع فقط، يفحص نتيجة meta،
-                  يعيد التشغيل لو جاءت تعديلات أثناء الرفع، ويعيد المحاولة عند الفشل.
-               ④ الطابور يُحفظ فى IndexedDB ويُرفع تلقائياً عند الدخول التالى
-                  قبل التحميل (فلا تضيع تعديلات لم تصل السحابة).
-               ⑤ settings / paymentAccounts (وفيها portalAccounts) تُحفظ وتُحمَّل
-                  عبر المفتاح sahab_config.
-               ⑥ حفظ حالة فسخ العقد صراحةً فى الطابور (العميل + منطقته).
+               طبقة إضافية فى آخر السكربت (نفس أسلوب الطبقات السابقة). التعديلات داخل
+               الدوال القائمة (6 مواضع) موثّقة فى diffs/admin_v87_to_v88.diff.
+               1) الحفظ كان يكتب على  sahab_<نوع>_<id>  والتحميل يقرأ من  al_oula_<نوع>_<id>
+                  → ما يُحفظ لا يظهر بعد إعادة الفتح. الآن الاثنان على نفس المفتاح.
+               2) فشل قراءة السيرفر لم يعد يُفسَّر "مشروع فارغ" (كان يُرسم لوحة أصفار + نجاح كاذب).
+               3) لا يُفتح اللوجن إلا بعد /health = جاهز (قرص السيرفر يُقرأ ويُكتب + meta سليم).
+               4) لا حفظ على السحابة قبل اكتمال تحميلها بنجاح (يمنع كتابة meta من حالة فارغة/ناقصة).
+               5) الكتابة على السيرفر بمفتاح الأدمن فقط (يتحقق منه السيرفر لا الواجهة).
                ══════════════════════════════════════════════════════════════════ */
-            (function v88CloudFix() {
-                var COLS = [
-                    { arr: 'regions',                meta: 'regionIds',                type: 'region',     pfx: 'reg',        prefixes: ['sahab_region_', 'al_oula_region_'] },
-                    { arr: 'customers',              meta: 'customerIds',              type: 'customer',   pfx: 'cust',       prefixes: ['sahab_customer_', 'al_oula_customer_'] },
-                    { arr: 'expenses',               meta: 'expenseIds',               type: 'expense',    pfx: 'exp',        prefixes: ['sahab_expense_', 'al_oula_expense_'] },
-                    { arr: 'externalExpenses',       meta: 'extExpenseIds',            type: 'extexp',     pfx: 'ext',        prefixes: ['sahab_extexp_', 'al_oula_extexp_'] },
-                    { arr: 'collections',            meta: 'collectionIds',            type: 'col',        pfx: 'col',        prefixes: ['sahab_col_', 'al_oula_col_'] },
-                    { arr: 'investorTreasury',       meta: 'investorTreasuryIds',      type: 'invTx',      pfx: 'invTx',      prefixes: ['sahab_invTx_', 'sahab_investorTreasuryTx_'] },
-                    { arr: 'investorProfiles',       meta: 'investorProfileIds',       type: 'invProfile', pfx: 'invProfile', prefixes: ['sahab_invProfile_', 'sahab_investorProfile_', 'al_oula_invProfile_'] },
-                    { arr: 'investorInvestments',    meta: 'investorInvestmentIds',    type: 'invest',     pfx: 'invest',     prefixes: ['sahab_invest_', 'sahab_investorInvestment_', 'al_oula_invest_'] },
-                    { arr: 'investmentTransactions', meta: 'investmentTransactionIds', type: 'investTx',   pfx: 'investTx',   prefixes: ['sahab_investTx_', 'sahab_investmentTransaction_', 'al_oula_investTx_'] }
-                ];
-                // كل أنواع markDirty المستخدمة فى الكود → حقل الـmeta ومصفوفة appData
-                var TYPE_META = {
-                    region: 'regionIds', customer: 'customerIds', expense: 'expenseIds', extexp: 'extExpenseIds', col: 'collectionIds',
-                    invTx: 'investorTreasuryIds', investorTreasuryTx: 'investorTreasuryIds',
-                    invProfile: 'investorProfileIds', investorProfile: 'investorProfileIds',
-                    invest: 'investorInvestmentIds', investorInvestment: 'investorInvestmentIds',
-                    investTx: 'investmentTransactionIds', investmentTransaction: 'investmentTransactionIds'
-                };
+            var _V88_TYPE_PREFIX = {
+                region: 'al_oula_region_', customer: 'al_oula_customer_', expense: 'al_oula_expense_',
+                extexp: 'al_oula_extexp_', col: 'al_oula_col_', invProfile: 'al_oula_invProfile_',
+                invest: 'al_oula_invest_', investTx: 'al_oula_investTx_', invTx: 'al_oula_invTx_'
+            };
+            var _V88_TYPE_ALIAS = {
+                investorProfile: 'invProfile', investorInvestment: 'invest',
+                investmentTransaction: 'investTx', investorTreasuryTx: 'invTx'
+            };
+            function _cloudKeyFor(type, id) {
+                var t = _V88_TYPE_ALIAS[type] || type;
+                var p = _V88_TYPE_PREFIX[t];
+                if (!p) { console.warn('v88: نوع غير معروف فى طابور الحفظ:', type); p = 'al_oula_' + t + '_'; }
+                return p + id;
+            }
+            // مفاتيح البيانات الأساسية: فشل قراءتها يوقف التحميل بدل أن يُعتبر "لا شىء"
+            function _v88Fail(key, why) {
+                if (/^al_oula_(meta$|(region|customer|expense|extexp|col|invProfile|invest|investTx|invTx)_)/.test(String(key)))
+                    throw new Error('تعذّر قراءة (' + key + ') من السيرفر: ' + why);
+                return null;
+            }
+            function _v88Loaded() { window._cloudLoadedOk = true; }
+            window._cloudLoadedOk = false;
+            window._v88Ready = false;
+            window._v88Missing = 0;
+
+            async function _v88Health() {
+                var out = { ok: false, ready: false, reason: 'unreachable' };
+                try {
+                    var c = new AbortController();
+                    var t = setTimeout(function () { c.abort(); }, 8000);
+                    var r = await fetch(API_BASE_URL + '/health', { cache: 'no-store', signal: c.signal });
+                    clearTimeout(t);
+                    if (r.ok) out = await r.json(); else out.reason = 'HTTP ' + r.status;
+                } catch (e) { out.reason = 'unreachable'; }
+                window._v88LastHealth = out;
+                return out;
+            }
+
+            // جاهزية حقيقية = /health جاهز  +  قراءة مصرّح بها تنجح
+            var _v88ReachablePrev = _v18ServerReachable;
+            _v18ServerReachable = async function () {
+                var h = await _v88Health();
+                var ok = !!(h && h.ok && h.ready);
+                if (ok) {
+                    var authOk = false;
+                    try { authOk = await _v88ReachablePrev(); } catch (e) {}
+                    if (!authOk) { ok = false; h.reason = 'auth'; }
+                }
+                window._v88Ready = ok;
+                return ok;
+            };
+
+            function _v88Blocked() {
+                var h = window._v88LastHealth || {}, msg;
+                switch (h.reason) {
+                    case 'not-initialized': msg = 'السيرفر جديد ولم تتم تهيئته — لن يُفتح الدخول. مشروع جديد: node server.js --init  |  بيانات قديمة: أداة الترحيل.'; break;
+                    case 'meta-missing':    msg = 'توجد بيانات على السيرفر بلا فهرس (meta) — لن يُفتح الدخول حمايةً للبيانات. شغّل أداة الترحيل بخيار --fix-meta.'; break;
+                    case 'meta-corrupt':    msg = 'فهرس البيانات (meta) على السيرفر تالف — لن يُفتح الدخول. استرجع من data/history أو data/backups.'; break;
+                    case 'auth':            msg = 'السيرفر رفض مفتاح القراءة — تأكد من client-config.js.'; break;
+                    case 'unreachable':     msg = 'تعذّر الوصول لسيرفر الشركة — لن يُفتح تسجيل الدخول لحين عودة الاتصال.'; break;
+                    default:                msg = 'السيرفر غير جاهز (' + (h.reason || '؟') + ') — لن يُفتح تسجيل الدخول.';
+                }
+                _v81ShowLoginBlocked(msg);
+            }
+
+            // ⛔ لا فورم لوجن إلا لو السيرفر جاهز
+            var _v88ShowFormPrev = _lcShowLoginForm;
+            _lcShowLoginForm = function () {
+                if (!window._v88Ready) { _v88Blocked(); return; }
+                _v88ShowFormPrev();
+            };
+
+            // مفتاح الأدمن: يتحقق منه السيرفر؛ بدونه التطبيق للعرض فقط
+            async function _v88IsAdminToken(t) {
+                try {
+                    var r = await fetch(API_BASE_URL + '/api/whoami', { headers: { 'Authorization': 'Bearer ' + t, 'apikey': t }, cache: 'no-store' });
+                    return (await r.json()).role === 'admin';
+                } catch (e) { return false; }
+            }
+            async function _v88EnsureAdminToken() {
+                var have = null;
+                try { have = sessionStorage.getItem('al_oula_token'); } catch (e) {}
+                if (have && await _v88IsAdminToken(have)) { API_TOKEN = have; return true; }
+                for (var i = 0; i < 3; i++) {
+                    var t = prompt('أدخل مفتاح الأدمن الخاص بالسيرفر (مطلوب لحفظ أى تعديل):');
+                    if (!t) break;
+                    t = t.trim();
+                    if (await _v88IsAdminToken(t)) {
+                        try { sessionStorage.setItem('al_oula_token', t); } catch (e) {}
+                        API_TOKEN = t; return true;
+                    }
+                    alert('المفتاح غير صحيح');
+                }
+                alert('لم يُدخَل مفتاح أدمن صحيح — سيعمل التطبيق للعرض فقط ولن يُحفظ أى تعديل على السيرفر.');
+                return false;
+            }
+
+            var _v88LoginPrev = login;
+            login = async function () {
+                var ok = await _v18ServerReachable();           // تحقق لحظة الدخول نفسها
+                if (!ok) { _v88Blocked(); return; }
+                var r = _v88LoginPrev.apply(this, arguments);
+                if (currentUser === 'admin') { try { await _v88EnsureAdminToken(); } catch (e) {} }
+                return r;
+            };
+
+            var _v88LogoutPrev = logout;
+            logout = function () {
+                var r = _v88LogoutPrev.apply(this, arguments);
+                API_TOKEN = window.__ALOULA_READ_KEY__ || '';   // لا يبقى مفتاح أدمن فى الذاكرة بعد الخروج
+                window._cloudLoadedOk = false;
+                try { sessionStorage.removeItem('al_oula_token'); } catch (e) {}
+                return r;
+            };
+
+            // 🛑 لا رفع للسحابة قبل اكتمال تحميلها (يمنع كتابة meta من حالة فارغة/ناقصة)
+            var _v88SavePrev = saveToCloud;
+            saveToCloud = async function () {
+                if (!window._cloudLoadedOk) { console.warn('⛔ v88: الحفظ على السيرفر موقوف — لم يكتمل تحميل السحابة'); return; }
+                return _v88SavePrev.apply(this, arguments);
+            };
+
+            var _v88InitPrev = initializeData;
+            initializeData = async function () {
+                window._cloudLoadedOk = false; window._v88Missing = 0;
+                var res = await _v88InitPrev.apply(this, arguments);
+                try {
+                    if (!window._cloudLoadedOk) {
+                        _v19ShowBanner('وضع العرض فقط: لم يكتمل تحميل بيانات السيرفر — أى تعديل الآن لن يُحفظ. حدّث الصفحة بعد عودة الاتصال.', 'blocked');
+                    } else if (window._v88Missing > 0) {
+                        _v19ShowBanner('تنبيه: ' + window._v88Missing + ' سجل مذكور فى فهرس البيانات ولم يُعثر عليه على السيرفر. راجع أداة الترحيل (تقرير الناقص).', 'warn');
+                    } else { _v18ClearOfflineBanner(); }
+                } catch (e) {}
+                return res;
+            };
+
+            console.log('%c🖥️ v88: سيرفر Dell أساس + بوابة جاهزية + توحيد مفاتيح الحفظ/التحميل',
+                        'color:#1565c0;font-weight:bold;font-size:13px');
+
+        
+            /* ══════════════════════════════════════════════════════════════════
+               🧩 v89 — دمج ما كان ناقصًا من v88 المستقر فى نسخة السيرفر (إضافة تراكمية فقط)
+               ① الخزينة (investorTreasury) كانت تُحفظ ولا تُحمَّل → تظهر فارغة بعد إعادة الفتح.
+               ② settings/paymentAccounts (وفيها portalAccounts) لم تكن تُحفظ على السيرفر أصلاً → مفتاح al_oula_config.
+               ③ الطابور المعلّق يُحفظ فى IndexedDB ويُعاد حقنه بعد التحميل (لا تضيع تعديلات لم تصل).
+               ④ حفظ حالة فسخ العقد صراحةً (العميل + منطقته).
+               ⑤ إعادة محاولة الرفع تلقائيًا عند الفشل.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v89Merge() {
+                var PENDING_KEY = 'pending_queue_v89', CFG_KEY = 'al_oula_config', CFG_OLD = 'sahab_config', CFG_DIRTY = 'al_oula_cfg_dirty_v89';
                 var TYPE_ARR = {
                     region: 'regions', customer: 'customers', expense: 'expenses', extexp: 'externalExpenses', col: 'collections',
                     invTx: 'investorTreasury', investorTreasuryTx: 'investorTreasury',
@@ -44446,17 +44577,10 @@ async function processInstallments(editIndex) {
                     invest: 'investorInvestments', investorInvestment: 'investorInvestments',
                     investTx: 'investmentTransactions', investmentTransaction: 'investmentTransactions'
                 };
-                var PENDING_KEY = 'pending_queue_v88';
-                var CFG_DIRTY = 'al_oula_cfg_dirty_v88';
+                var cfgBaseline = null, persistT = null, retryN = 0, retryT = null, restored = null;
 
-                var loaded = false, seenMeta = false, cfgReady = false, cfgMissing = false, cfgBaseline = null;
-                var rerun = false, metaDirty = false, retryN = 0, retryT = null, markT = null, persistT = null;
-                var recoveredPending = [];
-
-                /* ── IndexedDB (مخزن الكاش الموجود أصلاً) ── */
-                function _idbReady() {
-                    return dbInstance ? Promise.resolve(dbInstance) : initIndexedDB();
-                }
+                /* ── IndexedDB (نفس مخزن الكاش الموجود) ── */
+                function _idbReady() { return dbInstance ? Promise.resolve(dbInstance) : initIndexedDB(); }
                 function idbPut(obj) {
                     return _idbReady().then(function (db) {
                         return new Promise(function (res) {
@@ -44464,8 +44588,7 @@ async function processInstallments(editIndex) {
                                 var tx = db.transaction([STORES.CACHE], 'readwrite');
                                 tx.objectStore(STORES.CACHE).put(obj);
                                 tx.oncomplete = function () { res(true); };
-                                tx.onerror = function () { res(false); };
-                                tx.onabort = function () { res(false); };
+                                tx.onerror = tx.onabort = function () { res(false); };
                             } catch (e) { res(false); }
                         });
                     }).catch(function () { return false; });
@@ -44482,7 +44605,7 @@ async function processInstallments(editIndex) {
                     }).catch(function () { return null; });
                 }
 
-                /* ── حفظ الطابور المعلّق محلياً ── */
+                /* ── ③ حفظ الطابور المعلّق محليًا ── */
                 function persistQueue() {
                     var items = Object.keys(_deltaQueue).map(function (k) {
                         var c = _deltaQueue[k];
@@ -44490,339 +44613,604 @@ async function processInstallments(editIndex) {
                     });
                     return idbPut({ key: PENDING_KEY, savedAt: new Date().toISOString(), items: items });
                 }
-                function schedulePersist() {
-                    clearTimeout(persistT);
-                    persistT = setTimeout(persistQueue, 300);
-                }
+                function schedulePersist() { clearTimeout(persistT); persistT = setTimeout(persistQueue, 300); }
                 var _md = markDirty;
                 markDirty = function (t, i) { var r = _md(t, i); schedulePersist(); return r; };
                 var _mdel = markDeleted;
                 markDeleted = function (t, id) { var r = _mdel(t, id); schedulePersist(); return r; };
-
-                /* ── اكتشاف التعديلات فوراً (لا ننتظر مؤقت الثانية) ── */
-                var _sd = saveData;
-                saveData = function () {
-                    var r = _sd.apply(this, arguments);
-                    if (loaded) {
-                        clearTimeout(markT);
-                        markT = setTimeout(function () {
-                            try { _autoMarkDirty(); } catch (e) {}
-                            schedulePersist();
-                        }, 250);
-                    }
-                    return r;
-                };
-                function _flushOnHide() {
-                    try { if (loaded && currentUser) { _autoMarkDirty(); persistQueue(); } } catch (e) {}
-                }
+                function _flushOnHide() { try { if (window._cloudLoadedOk && currentUser) { _autoMarkDirty(); persistQueue(); } } catch (e) {} }
                 window.addEventListener('pagehide', _flushOnHide);
-                document.addEventListener('visibilitychange', function () {
-                    if (document.visibilityState === 'hidden') _flushOnHide();
-                });
+                document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') _flushOnHide(); });
 
-                /* ── إعدادات الحساب (settings + paymentAccounts) ── */
+                async function restorePending() {
+                    var rec = await idbGet(PENDING_KEY);
+                    restored = (rec && rec.items && rec.items.length) ? rec.items : [];
+                }
+                function reinjectPending() {
+                    if (!restored || !restored.length || !window._cloudLoadedOk) return;
+                    restored.forEach(function (it) {
+                        var f = TYPE_ARR[it.type]; if (!f) return;
+                        appData[f] = appData[f] || [];
+                        var idx = appData[f].findIndex(function (x) { return x && x._id === it.id; });
+                        if (it.deleted) { if (idx >= 0) appData[f].splice(idx, 1); markDeleted(it.type, it.id); }
+                        else if (it.data) { if (idx >= 0) appData[f][idx] = it.data; else appData[f].push(it.data); markDirty(it.type, it.data); }
+                    });
+                    console.warn('⚠️ v89: أُعيد حقن ' + restored.length + ' تعديل معلّق لم يصل السيرفر — سيُرفع الآن');
+                    restored = null;
+                    try { autoSaveToCloud(); } catch (e) {}
+                }
+                function scheduleRetry() {
+                    clearTimeout(retryT); retryN++;
+                    retryT = setTimeout(function () { try { autoSaveToCloud(); } catch (e) {} }, Math.min(60000, 5000 * retryN));
+                }
+
+                /* ── ② إعدادات الحساب (settings + paymentAccounts) ── */
                 function cfgObj() { return { settings: appData.settings || {}, paymentAccounts: appData.paymentAccounts || { wallets: [], banks: [] } }; }
                 function cfgJson() { try { return JSON.stringify(cfgObj()); } catch (e) { return ''; } }
                 function cfgMeaningful() {
                     var s = appData.settings || {}, pa = appData.paymentAccounts || {};
                     var extra = Object.keys(s).filter(function (k) { return k !== 'lateFeeRate' && k !== 'gracePeriodDays'; }).length;
-                    return extra > 0 || (pa.wallets || []).length > 0 || (pa.banks || []).length > 0 ||
-                           s.lateFeeRate !== 0.1 || s.gracePeriodDays !== 5;
+                    return extra > 0 || (pa.wallets || []).length > 0 || (pa.banks || []).length > 0 || s.lateFeeRate !== 0.1 || s.gracePeriodDays !== 5;
                 }
                 function applyCloudConfig(cfg) {
-                    var localJ = cfgJson();
-                    var pending = localStorage.getItem(CFG_DIRTY) === '1' || (cfgBaseline !== null && localJ !== cfgBaseline);
+                    var pending = localStorage.getItem(CFG_DIRTY) === '1' || (cfgBaseline !== null && cfgJson() !== cfgBaseline);
                     if (pending) { localStorage.setItem(CFG_DIRTY, '1'); return; }   // تعديل محلى لم يُرفع — لا نكتب فوقه
                     if (cfg.settings) appData.settings = Object.assign({}, appData.settings || {}, cfg.settings);
                     if (cfg.paymentAccounts) appData.paymentAccounts = cfg.paymentAccounts;
                     cfgBaseline = cfgJson();
                 }
 
-                /* ── مخزن محلى احتياطى للسجلات التى لم تُجلب ── */
-                async function localPool() {
-                    var pool = { byId: {}, arrays: {} };
-                    function add(name, arr) {
-                        if (!Array.isArray(arr)) return;
-                        arr.forEach(function (x) { if (x && x._id) pool.byId[x._id] = x; });
-                        if (arr.length && !pool.arrays[name]) pool.arrays[name] = arr;
-                    }
-                    try {
-                        var s = await loadAppDataFromCache();
-                        if (s) COLS.forEach(function (c) { add(c.arr, s[c.arr]); });
-                    } catch (e) {}
-                    COLS.forEach(function (c) { add(c.arr, appData[c.arr]); });   // الذاكرة الحالية تتغلب على الكاش
-                    return pool;
-                }
-
-                async function fetchOne(id, prefixes) {
-                    for (var p = 0; p < prefixes.length; p++) {
-                        var v = await cloudGet(prefixes[p] + id, 2);
-                        if (v !== null && v !== undefined) return v;
-                    }
-                    return null;
-                }
-                async function fetchCol(ids, prefixes) {
+                /* ── ① جلب الخزينة + ② الإعدادات مع كل تحميل من السيرفر ── */
+                async function fetchCol(ids, prefix) {
                     var out = [];
-                    for (var i = 0; i < ids.length; i += 20) {
-                        var part = await Promise.all(ids.slice(i, i + 20).map(function (id) { return fetchOne(id, prefixes); }));
-                        out = out.concat(part);
-                    }
-                    return out;
+                    for (var i = 0; i < ids.length; i += 20)
+                        out = out.concat(await Promise.all(ids.slice(i, i + 20).map(function (id) { return cloudGet(prefix + id, 2); })));
+                    return out.filter(function (x) { return x !== null && x !== undefined; });
                 }
-
-                /* ① + ② تحميل جديد ── نفس الاسم ونفس شكل النتيجة + خزينة المستثمرين */
+                var _lc = loadFromCloud;
                 loadFromCloud = async function () {
+                    var res = await _lc.apply(this, arguments);
                     var meta = await cloudGet('al_oula_meta');
-                    if (!(meta && meta.version === 'delta2')) return null;
-                    seenMeta = true;
-                    var pool = await localPool();
-                    var result = {};
-                    var expected = 0, found = 0, recovered = 0, lost = 0;
-
-                    for (var ci = 0; ci < COLS.length; ci++) {
-                        var col = COLS[ci], ids = meta[col.meta];
-                        if (!Array.isArray(ids)) {                       // meta قديم بلا هذا الحقل: لا نمسح المحلى
-                            result[col.arr] = (pool.arrays[col.arr] || []).slice();
-                            continue;
-                        }
-                        var got = await fetchCol(ids, col.prefixes);
-                        var arr = [];
-                        for (var i = 0; i < ids.length; i++) {
-                            expected++;
-                            if (got[i] !== null && got[i] !== undefined) { found++; arr.push(got[i]); }
-                            else if (pool.byId[ids[i]]) {                // مفقود فى السحابة → من الكاش المحلى + إعادة رفعه
-                                recovered++; arr.push(pool.byId[ids[i]]);
-                                _deltaQueue[col.type + '_' + ids[i]] = { type: col.type, id: ids[i], data: pool.byId[ids[i]] };
-                            } else { lost++; }
-                        }
-                        result[col.arr] = arr;
+                    if (res && meta && Array.isArray(meta.investorTreasuryIds)) {
+                        res.investorTreasury = await fetchCol(meta.investorTreasuryIds, 'al_oula_invTx_');
+                        window._v88Missing = (window._v88Missing || 0) + Math.max(0, meta.investorTreasuryIds.length - res.investorTreasury.length);
                     }
-
-                    if (expected > 0 && found === 0 && recovered === 0) {
-                        throw new Error('السحابة فيها ' + expected + ' سجل لكن لم يُجلب أى سجل — تم إيقاف التحميل لحماية بياناتك من المسح');
-                    }
-                    if (recovered || lost) {
-                        console.warn('⚠️ v88: استُرد من الكاش=' + recovered + ' | لم يُعثر عليه=' + lost);
-                        try { updateCloudStatus('⚠️ تحميل ناقص: ' + lost + ' سجل لم يُجلب، ' + recovered + ' استُرد محلياً', 'error', 100); } catch (e) {}
-                    }
-                    result.lastUpdate    = meta.lastUpdate;
-                    result.lastDeviceId  = meta.lastDeviceId;
-                    result.auditLog      = meta.auditLog      || [];
-                    result.buildingNotes = meta.buildingNotes || {};
-
-                    // ⑤ إعدادات الحساب
-                    try {
-                        var cfg = await cloudGet('sahab_config');
-                        cfgReady = true;
-                        if (cfg && typeof cfg === 'object') { cfgMissing = false; applyCloudConfig(cfg); }
-                        else { cfgMissing = true; if (cfgBaseline === null) cfgBaseline = cfgJson(); }
-                    } catch (e) { console.warn('v88 config load:', e); }
-                    return result;
+                    var cfg = await cloudGet(CFG_KEY, 2);
+                    if (cfg === null || cfg === undefined) cfg = await cloudGet(CFG_OLD, 2);   // توافق مع بيانات سوبابيز القديمة
+                    if (cfg) applyCloudConfig(cfg);
+                    else { cfgBaseline = cfgMeaningful() ? '' : cfgJson(); }                    // '' = محلى ذو معنى ولم يُرفع بعد
+                    return res;
                 };
-
-                /* ③ حفظ جديد ── نفس الاسم */
-                function scheduleRetry() {
-                    if (retryN >= 6) return;
-                    retryN++;
-                    clearTimeout(retryT);
-                    retryT = setTimeout(function () { try { autoSaveToCloud(); } catch (e) {} }, Math.min(60000, 5000 * retryN));
-                }
+                var _sc = saveToCloud;
                 saveToCloud = async function () {
-                    if (!currentUser) return;
-                    if (cloudSyncInProgress) { rerun = true; return; }
-                    cloudSyncInProgress = true;
-                    showCloudSyncIndicator('syncing');
-                    var ok = true;
+                    var r = await _sc.apply(this, arguments);
                     try {
-                        var now = new Date().toISOString();
-                        COLS.forEach(function (c) { (appData[c.arr] || []).forEach(function (x) { if (x) _ensureId(x, c.pfx); }); });
-
-                        var snapKeys = Object.keys(_deltaQueue), snap = {};
-                        snapKeys.forEach(function (k) { snap[k] = _deltaQueue[k]; });
-                        var failed = {}, up = 0;
-                        for (var bi = 0; bi < snapKeys.length; bi += 20) {
-                            var rs = await Promise.all(snapKeys.slice(bi, bi + 20).map(function (qk) {
-                                var ch = snap[qk], key = 'sahab_' + ch.type + '_' + ch.id;
-                                return (ch.deleted ? cloudSet(key, null) : cloudSet(key, ch.data))
-                                    .then(function (o) { return { qk: qk, ok: o }; });
-                            }));
-                            rs.forEach(function (r) { if (r.ok) up++; else failed[r.qk] = true; });
+                        if (!currentUser || !window._cloudLoadedOk || cfgBaseline === null) return r;
+                        var j = cfgJson();
+                        if (j && j !== cfgBaseline && (cfgMeaningful() || cfgBaseline !== '')) {
+                            if (await cloudSet(CFG_KEY, cfgObj())) { cfgBaseline = j; localStorage.removeItem(CFG_DIRTY); retryN = 0; }
+                            else { localStorage.setItem(CFG_DIRTY, '1'); scheduleRetry(); }
                         }
-                        if (Object.keys(failed).length) ok = false;
-                        var okKeys = snapKeys.filter(function (k) { return !failed[k]; });
-
-                        var metaWritten = false;
-                        if (okKeys.length || metaDirty) {
-                            var cloudMeta = await fetchLatestCloudMeta();
-                            if (cloudMeta.version !== 'delta2' && seenMeta) {
-                                // فشل جلب meta (وليس مشروعاً جديداً): لا نكتب meta ناقصة فوق السحابة
-                                ok = false; metaDirty = true;
-                                console.warn('⚠️ v88: تعذّر جلب meta — تأجيل كتابتها');
-                            } else {
-                                var delSets = {}, queuedIds = {};
-                                okKeys.forEach(function (k) {
-                                    var ch = snap[k], f = TYPE_META[ch.type];
-                                    if (!f) return;
-                                    if (ch.deleted) { (delSets[f] = delSets[f] || {})[ch.id] = true; }
-                                    else { (queuedIds[f] = queuedIds[f] || []).push(ch.id); }
-                                });
-                                var auditLog = [];
-                                try { auditLog = JSON.parse(localStorage.getItem('al_oula_audit_log') || '[]'); } catch (e) {}
-                                var buildingNotes = {};
-                                for (var i = 0; i < localStorage.length; i++) {
-                                    var lk = localStorage.key(i);
-                                    if (lk && (lk.startsWith('building_note_') || lk.startsWith('building_notes_log_'))) buildingNotes[lk] = localStorage.getItem(lk);
-                                }
-                                var meta = Object.assign({}, cloudMeta, {
-                                    version: 'delta2', lastUpdate: now, lastDeviceId: deviceId,
-                                    auditLog: auditLog, buildingNotes: buildingNotes, appUsers: appUsers
-                                });
-                                COLS.forEach(function (c) {
-                                    var local = (appData[c.arr] || []).map(function (x) { return x && x._id; }).concat(queuedIds[c.meta] || []);
-                                    meta[c.meta] = mergeIdLists(cloudMeta[c.meta], local, delSets[c.meta] || {});
-                                });
-                                var mok = await cloudSet('al_oula_meta', meta);
-                                if (mok) {
-                                    if (!seenMeta && !cfgReady) { cfgReady = true; cfgMissing = true; cfgBaseline = cfgJson(); }   // مشروع جديد فقط
-                                    seenMeta = true; metaWritten = true; metaDirty = false;
-                                }
-                                else { ok = false; metaDirty = true; }
-                            }
-                        }
-                        // نمسح من الطابور المرفوع فقط (وبشرط نجاح meta) — أى تعديل جديد أثناء الرفع يبقى
-                        if (metaWritten) okKeys.forEach(function (k) { if (_deltaQueue[k] === snap[k]) delete _deltaQueue[k]; });
-
-                        // ⑤ الإعدادات
-                        if (cfgReady) {
-                            var cj = cfgJson();
-                            var need = cj && (cj !== cfgBaseline || localStorage.getItem(CFG_DIRTY) === '1' || (cfgMissing && cfgMeaningful()));
-                            if (need) {
-                                var cfgVal = cfgObj(); cfgVal.updatedAt = now; cfgVal.deviceId = deviceId;
-                                var okc = await cloudSet('sahab_config', cfgVal);
-                                if (okc) { cfgBaseline = cj; cfgMissing = false; localStorage.removeItem(CFG_DIRTY); }
-                                else { ok = false; localStorage.setItem(CFG_DIRTY, '1'); }
-                            }
-                        }
-
-                        if (ok) {
-                            lastCloudSync = now; localLastModified = now; retryN = 0;
-                            localStorage.setItem('al_oula_last_sync', now);
-                            localStorage.setItem('al_oula_last_modified', now);
-                            showCloudSyncIndicator('success', up ? ('✅ رُفع ' + up + ' عنصر') : '✅ لا تغييرات');
-                        } else {
-                            showCloudSyncIndicator('error', 'تعذّر رفع بعض التعديلات — ستُعاد المحاولة تلقائياً');
-                        }
-                        schedulePersist();
-                    } catch (error) {
-                        ok = false;
-                        showCloudSyncIndicator('error', error.message);
-                    } finally {
-                        cloudSyncInProgress = false;
-                    }
-                    if (rerun || (ok && Object.keys(_deltaQueue).length)) { rerun = false; setTimeout(function () { try { autoSaveToCloud(); } catch (e) {} }, 400); }   // تعديلات وصلت أثناء الرفع
-                    else if (!ok) scheduleRetry();
+                        if (Object.keys(_deltaQueue).length) scheduleRetry();
+                    } catch (e) { scheduleRetry(); }
+                    return r;
                 };
 
-                /* ④ رفع الطابور المحفوظ محلياً قبل تحميل السحابة (حتى لا تُكتب فوقه) */
-                async function restorePending() {
-                    var rec = await idbGet(PENDING_KEY);
-                    var items = (rec && Array.isArray(rec.items)) ? rec.items : [];
-                    if (!items.length) return;
-                    var failedItems = items;
-                    var cloudMeta = await cloudGet('al_oula_meta');
-                    if (cloudMeta && cloudMeta.version === 'delta2') {
-                        var okItems = [], badItems = [];
-                        for (var bi = 0; bi < items.length; bi += 20) {
-                            var rs = await Promise.all(items.slice(bi, bi + 20).map(function (it) {
-                                var key = 'sahab_' + it.type + '_' + it.id;
-                                return (it.deleted ? cloudSet(key, null) : cloudSet(key, it.data)).then(function (o) { return { it: it, ok: o }; });
-                            }));
-                            rs.forEach(function (r) { (r.ok ? okItems : badItems).push(r.it); });
-                        }
-                        if (okItems.length) {
-                            var mm = Object.assign({}, cloudMeta, { lastUpdate: new Date().toISOString(), lastDeviceId: deviceId });
-                            okItems.forEach(function (it) {
-                                var f = TYPE_META[it.type]; if (!f) return;
-                                var list = (mm[f] || []).filter(function (x) { return x !== it.id; });
-                                if (!it.deleted) list.push(it.id);
-                                mm[f] = list;
-                            });
-                            var mok = await cloudSet('al_oula_meta', mm);
-                            badItems = mok ? badItems : items;
-                        }
-                        failedItems = badItems;
-                    }
-                    recoveredPending = failedItems;
-                    await idbPut({ key: PENDING_KEY, savedAt: new Date().toISOString(), items: failedItems });
-                }
-                function reinjectPending() {
-                    if (!recoveredPending.length) return;
-                    recoveredPending.forEach(function (it) {
-                        var an = TYPE_ARR[it.type]; if (!an) return;
-                        var arr = appData[an] = appData[an] || [];
-                        var idx = arr.findIndex(function (x) { return x && x._id === it.id; });
-                        if (it.deleted) {
-                            if (idx >= 0) arr.splice(idx, 1);
-                            _deltaQueue[it.type + '_' + it.id] = { type: it.type, id: it.id, deleted: true };
-                        } else if (it.data) {
-                            if (idx >= 0) arr[idx] = it.data; else arr.push(it.data);
-                            _deltaQueue[it.type + '_' + it.id] = { type: it.type, id: it.id, data: it.data };
-                        }
-                    });
-                    recoveredPending = [];
-                    schedulePersist();
-                    try { saveToLocalStorage(); saveAppDataToCache(); } catch (e) {}
-                    try { renderDashboard(); renderTree(); } catch (e) {}
-                    try { autoSaveToCloud(); } catch (e) {}
-                }
-
-                var _initV88 = initializeData;
+                var _init = initializeData;
                 initializeData = async function () {
-                    loaded = false;
-                    try { await restorePending(); } catch (e) { console.warn('v88 restorePending:', e); }
-                    var res;
-                    try { res = await _initV88(); }
-                    finally { loaded = true; }
-                    try { reinjectPending(); } catch (e) { console.warn('v88 reinject:', e); }
-                    if (!cloudAutoSyncEnabled) {
-                        try { showCloudSaveNotification('⚠️ المزامنة التلقائية متوقفة — تعديلاتك لن تُرفع للسحابة إلا يدوياً', 'error'); } catch (e) {}
-                    }
+                    try { await restorePending(); } catch (e) {}
+                    var res = await _init.apply(this, arguments);
+                    try { reinjectPending(); } catch (e) { console.warn('v89 reinject:', e); }
                     return res;
                 };
 
-                /* لا نستبدل بيانات محلية فيها تعديلات معلّقة بنسخة السحابة (سحب الـ30 ثانية) */
-                var _hc = handleConflict;
-                handleConflict = async function (cloudData) {
-                    if (Object.keys(_deltaQueue).length || cloudSyncInProgress) {
-                        console.warn('⏸️ v88: تعديلات معلّقة — رفعها أولاً بدل الكتابة فوقها');
-                        try { autoSaveToCloud(); } catch (e) {}
-                        return;
-                    }
-                    var r = await _hc(cloudData);
-                    try { _lastSnapshot = _buildSnapshot(); } catch (e) {}
-                    return r;
-                };
-
-                /* ⑥ فسخ العقد: ضمان وصوله للطابور (العميل + المنطقة التى تحوى الوحدة) */
+                /* ── ④ فسخ العقد: العميل + منطقته صراحةً ── */
                 var _scc = saveContractCancellation;
                 saveContractCancellation = function (customerIndex) {
-                    var c = appData.customers[customerIndex];
-                    var r = _scc(customerIndex);
+                    var r = _scc.apply(this, arguments);
                     try {
+                        var c = appData.customers[customerIndex];
                         if (c) {
                             markDirty('customer', c);
                             (appData.regions || []).forEach(function (rg) {
-                                if ((rg.buildings || []).some(function (b) { return b.name === c.building && (b.units || []).some(function (u) { return u.code === c.unit; }); })) {
-                                    markDirty('region', rg);
-                                }
+                                if ((rg.buildings || []).some(function (b) { return b.name === c.building && (b.units || []).some(function (u) { return u.code === c.unit; }); })) markDirty('region', rg);
                             });
                             autoSaveToCloud();
                         }
-                    } catch (e) { console.warn('v88 cancellation:', e); }
+                    } catch (e) { console.warn('v89 cancellation:', e); }
                     return r;
                 };
 
-                console.log('%c🛠️ v88: تحميل/حفظ سحابى مصحّح + طابور محلى + sahab_config', 'color:#1565c0;font-weight:bold;font-size:13px');
+                console.log('%c🧩 v89: خزينة تُحمَّل + حفظ الإعدادات/حسابات البوابة + طابور معلّق IndexedDB + حفظ فسخ العقد', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+        
+            /* ══════════════════════════════════════════════════════════════════
+               🔀 v90 — مصدران للبيانات (Dell + سوبابيز) بمصدر نشط واحد فقط للكتابة
+               ─────────────────────────────────────────────────────────────────
+               • الافتراضى: Dell. لو غير جاهز يظهر زر "التحويل إلى سوبابيز (وضع الطوارئ)" فى شاشة الحجب.
+               • التحويل يدوى ويخص هذا الجهاز فقط (localStorage) — لا تحويل تلقائى أبدًا.
+               • فحص الجاهزية لسوبابيز = قراءة al_oula_meta (لا يوجد /health هناك).
+               • كل حفظ يوسم meta بـ writerSource/writerAt لمعرفة آخر مصدر كُتب عليه.
+               • النسخ بين المصدرين بالسكربت الخارجى mirror.js (اتجاه واحد + حارس "الهدف أحدث").
+               ══════════════════════════════════════════════════════════════════ */
+            (function v90Sources() {
+                var LSK = 'al_oula_active_source';
+                var SRC = window.__ALOULA_SOURCES__ || {
+                    dell:     { label: 'سيرفر Dell', url: API_BASE_URL },
+                    supabase: { label: 'سوبابيز (طوارئ)', url: 'https://rvrqrwnnpevjrnxfwifg.supabase.co', key: 'sb_publishable_afnXlraBkzbl98Cujfov9w_NBYkSSUm' }
+                };
+                var active = 'supabase';   /* v92: Dell معطّل — سوبابيز وحده */
+                window._v90Active = active;
+
+                function apply(id) {
+                    API_BASE_URL = SRC[id].url;
+                    API_TOKEN = (id === 'dell') ? (window.__ALOULA_READ_KEY__ || '') : SRC[id].key;
+                }
+                apply(active);
+                function setSource(id) { try { localStorage.setItem(LSK, id); } catch (e) {} location.reload(); }
+
+                /* جاهزية سوبابيز: meta موجود وسليم */
+                var _h = _v88Health;
+                _v88Health = async function () {
+                    if (active === 'dell') return _h.apply(this, arguments);
+                    var out = { ok: false, ready: false, reason: 'unreachable', service: 'supabase' };
+                    try {
+                        var c = new AbortController(), t = setTimeout(function () { c.abort(); }, 8000);
+                        var r = await fetch(API_BASE_URL + '/rest/v1/' + API_TABLE + '?key=eq.al_oula_meta&select=value&limit=1',
+                            { headers: { 'apikey': API_TOKEN, 'Authorization': 'Bearer ' + API_TOKEN }, cache: 'no-store', signal: c.signal });
+                        clearTimeout(t);
+                        if (!r.ok) out.reason = 'HTTP ' + r.status;
+                        else {
+                            var rows = await r.json();
+                            out.ok = true;
+                            if (!rows || !rows.length) out.reason = 'supabase-empty';
+                            else {
+                                try { var v = rows[0].value; if (typeof v === 'string') v = JSON.parse(v); out.ready = !!v; if (!v) out.reason = 'meta-corrupt'; }
+                                catch (e) { out.reason = 'meta-corrupt'; }
+                            }
+                        }
+                    } catch (e) { out.reason = 'unreachable'; }
+                    window._v88LastHealth = out;
+                    return out;
+                };
+
+                /* سوبابيز: لا مفتاح أدمن خاص (نفس سلوك ما قبل v88) */
+                var _ea = _v88EnsureAdminToken;
+                _v88EnsureAdminToken = async function () {
+                    if (active === 'dell') return _ea.apply(this, arguments);
+                    return true;
+                };
+
+                /* بعد الخروج: أعد مفتاح المصدر النشط (v88 كان يصفّره) */
+                var _lo = logout;
+                logout = function () { var r = _lo.apply(this, arguments); apply(active); return r; };
+
+                /* وسم آخر كاتب فى الفهرس */
+                var _bm = buildMergedMeta;
+                buildMergedMeta = function () {
+                    var m = _bm.apply(this, arguments);
+                    m.writerSource = active; m.writerAt = new Date().toISOString();
+                    return m;
+                };
+
+                /* زر التحويل داخل شاشة الحجب */
+                var _blk = _v81ShowLoginBlocked;
+                _v81ShowLoginBlocked = function (msg) {
+                    _blk.apply(this, arguments);
+                    var l = document.getElementById('login-loading');
+                    if (!l || true) return;
+                    var other = (active === 'dell') ? 'supabase' : 'dell';
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.style.cssText = 'margin:10px 6px 0;background:#455a64;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-weight:bold;cursor:pointer;';
+                    b.textContent = (active === 'dell') ? 'التحويل إلى سوبابيز (وضع الطوارئ)' : 'التحويل إلى سيرفر Dell';
+                    b.onclick = function () {
+                        var q = (active === 'dell')
+                            ? 'سيعمل هذا الجهاز على سوبابيز كمصدر وحيد للبيانات.\nلا تشغّل أجهزة أخرى على Dell فى نفس الوقت.\nالمتابعة؟'
+                            : 'سيعود هذا الجهاز إلى سيرفر Dell.\nتأكد أن Dell سحب آخر تعديلات سوبابيز (node mirror.js pull).\nالمتابعة؟';
+                        if (confirm(q)) setSource(other);
+                    };
+                    l.appendChild(b);
+                };
+
+                /* شارة ظاهرة طوال وضع الطوارئ */
+                function badge() {
+                    if (true || document.getElementById('v90-badge') || !document.body) return;
+                    var b = document.createElement('div');
+                    b.id = 'v90-badge';
+                    b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:2147483000;background:#b71c1c;color:#fff;padding:2px 9px;border-radius:12px;font:700 10px Arial,sans-serif;cursor:pointer;direction:rtl;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+                    b.textContent = '⚠️ طوارئ'; b.title = 'وضع الطوارئ: ' + SRC[active].label + ' — اضغط للعودة إلى Dell';
+                    b.onclick = function () {
+                        if (confirm('العودة إلى سيرفر Dell؟\nتأكد أولاً أن Dell سحب آخر تعديلات سوبابيز (node mirror.js pull) وإلا لن تظهر تعديلات الطوارئ.')) setSource('dell');
+                    };
+                    document.body.appendChild(b);
+                }
+                badge();
+                window.addEventListener('load', badge);
+
+                console.log('%c🔀 v90: المصدر النشط = ' + SRC[active].label, 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+        
+            /* ══════════════════════════════════════════════════════════════════
+               ☁️ v91 — كل تغيير يُرفع فورًا + ضمان شمول كل بيانات الموقع
+               ① المستخدمون/كلمات السر + ملاحظات العمارات + سجل الأحداث: كانت تُحفظ داخل الفهرس (meta) فقط،
+                  وsaveToCloud يخرج بـ"لا تغييرات" قبل كتابته → لا تصل السيرفر. الآن يُكتب الفهرس منفردًا عند تغيّرها.
+               ② كشف تلقائى لتغييرات/حذف المستثمرين (خزينة/ملفات/استثمارات/معاملات) + investmentLedger (نوع جديد ledger).
+               ③ رفع فورى: بعد أى saveData، وعند تغيّر ملاحظة/مستخدم/سجل، + شبكة أمان كل 45 ثانية.
+               ④ زر "رفع للسحابة" صار رفعًا كاملًا (كل السجلات) بدل رفع التغييرات فقط.
+               ⑤ إصلاح: _lastSnapshot كان يُبنى قبل markDirty فيُعاد رفع السجل (وملفاته الكبيرة) مع كل حفظ.
+               ⑥ تنبيه واضح لو فشل رفع سجل كبير (حد السيرفر 25MB للطلب الواحد).
+               ══════════════════════════════════════════════════════════════════ */
+            (function v91Sync() {
+                var EXTRA = [['invTx', 'investorTreasury'], ['invProfile', 'investorProfiles'], ['invest', 'investorInvestments'],
+                             ['investTx', 'investmentTransactions'], ['ledger', 'investmentLedger']];
+                var extraSnap = null, lastMetaSig = null, forceAll = false, tickT = null;
+                _V88_TYPE_PREFIX.ledger = 'al_oula_ledger_';
+
+                function arrOf(f) { return appData[f] || (appData[f] = []); }
+                function buildExtra() {
+                    var s = {};
+                    EXTRA.forEach(function (p) { arrOf(p[1]).forEach(function (it) { if (it) { _ensureId(it, p[0]); s[p[0] + '|' + it._id] = JSON.stringify(it); } }); });
+                    return s;
+                }
+                function markAll() {
+                    (appData.regions || []).forEach(function (x) { markDirty('region', x); });
+                    (appData.customers || []).forEach(function (x) { markDirty('customer', x); });
+                    (appData.expenses || []).forEach(function (x) { markDirty('expense', x); });
+                    (appData.externalExpenses || []).forEach(function (x) { markDirty('extexp', x); });
+                    (appData.collections || []).forEach(function (x) { markDirty('col', x); });
+                    EXTRA.forEach(function (p) { arrOf(p[1]).forEach(function (it) { if (it) markDirty(p[0], it); }); });
+                }
+
+                /* ② + ⑤ + ④: كشف التغييرات */
+                var _amd = _autoMarkDirty;
+                _autoMarkDirty = function () {
+                    _amd.apply(this, arguments);
+                    try {
+                        if (forceAll) markAll();
+                        if (extraSnap === null) extraSnap = buildExtra();
+                        else {
+                            var now = buildExtra();
+                            Object.keys(now).forEach(function (k) {
+                                if (now[k] === extraSnap[k]) return;
+                                var p = k.split('|'), f = EXTRA.filter(function (e) { return e[0] === p[0]; })[0][1];
+                                var it = arrOf(f).filter(function (x) { return x && x._id === p[1]; })[0];
+                                if (it) markDirty(p[0], it);
+                            });
+                            Object.keys(extraSnap).forEach(function (k) { if (!(k in now)) { var p = k.split('|'); markDeleted(p[0], p[1]); } });
+                            extraSnap = buildExtra();          // بعد markDirty (updatedAt) حتى لا يُعاد الرفع
+                        }
+                        _lastSnapshot = _buildSnapshot();     // ⑤
+                    } catch (e) { console.warn('v91 autoMarkDirty:', e); }
+                };
+
+                /* ② investmentLedger فى الفهرس والحذف والتحميل */
+                var _cd = collectDeletedIdsByType;
+                collectDeletedIdsByType = function (keys, snap) {
+                    var d = _cd.apply(this, arguments); d.ledger = {};
+                    (keys || []).forEach(function (qk) { var c = snap[qk]; if (c && c.deleted && c.type === 'ledger') d.ledger[c.id] = true; });
+                    return d;
+                };
+                var _bm = buildMergedMeta;
+                buildMergedMeta = function (cloudMeta, now, audit, notes, del) {
+                    var m = _bm.apply(this, arguments);
+                    m.investmentLedgerIds = mergeIdLists((cloudMeta || {}).investmentLedgerIds, arrOf('investmentLedger').map(function (x) { return x && x._id; }), (del || {}).ledger);
+                    return m;
+                };
+                var _lc = loadFromCloud;
+                loadFromCloud = async function () {
+                    var res = await _lc.apply(this, arguments);
+                    try {
+                        var meta = await cloudGet('al_oula_meta');
+                        if (res && meta && Array.isArray(meta.investmentLedgerIds)) {
+                            var out = [];
+                            for (var i = 0; i < meta.investmentLedgerIds.length; i += 20)
+                                out = out.concat(await Promise.all(meta.investmentLedgerIds.slice(i, i + 20).map(function (id) { return cloudGet('al_oula_ledger_' + id, 2); })));
+                            res.investmentLedger = out.filter(function (x) { return x !== null && x !== undefined; });
+                            window._v91Ledger = res.investmentLedger;
+                        }
+                    } catch (e) { console.warn('v91 ledger load:', e); }
+                    return res;
+                };
+
+                /* ① توقيع الفهرس: مستخدمون + ملاحظات عمارات + سجل الأحداث */
+                function metaSig() {
+                    var s = JSON.stringify(appUsers || []);
+                    try {
+                        var ks = [];
+                        for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && (k.indexOf('building_note_') === 0 || k.indexOf('building_notes_log_') === 0)) ks.push(k); }
+                        ks.sort().forEach(function (k) { s += '|' + k + '=' + localStorage.getItem(k); });
+                        s += '|' + (localStorage.getItem('al_oula_audit_log') || '').length;
+                    } catch (e) {}
+                    var h = 5381; for (var j = 0; j < s.length; j++) h = ((h << 5) + h + s.charCodeAt(j)) | 0;
+                    return h + ':' + s.length;
+                }
+                async function saveMetaOnly() {
+                    var cloudMeta = await fetchLatestCloudMeta();
+                    var audit = []; try { audit = JSON.parse(localStorage.getItem('al_oula_audit_log') || '[]'); } catch (e) {}
+                    var notes = {};
+                    for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && (k.indexOf('building_note_') === 0 || k.indexOf('building_notes_log_') === 0)) notes[k] = localStorage.getItem(k); }
+                    var meta = buildMergedMeta(cloudMeta, new Date().toISOString(), audit, notes, collectDeletedIdsByType([], {}));
+                    return cloudSet('al_oula_meta', meta);
+                }
+                var _sc = saveToCloud;
+                saveToCloud = async function () {
+                    var busy = cloudSyncInProgress, hadQ = Object.keys(_deltaQueue).length > 0;
+                    var r = await _sc.apply(this, arguments);
+                    try {
+                        if (busy || !currentUser || !window._cloudLoadedOk || (window._v88Missing || 0) > 0 || lastMetaSig === null) return r;
+                        var sig = metaSig();
+                        if (hadQ) { if (Object.keys(_deltaQueue).length === 0) lastMetaSig = sig; }
+                        else if (sig !== lastMetaSig) { if (await saveMetaOnly()) lastMetaSig = sig; }
+                    } catch (e) { console.warn('v91 meta-only:', e); }
+                    return r;
+                };
+
+                /* ③ رفع فورى */
+                function tick() {
+                    try {
+                        if (!currentUser || !window._cloudLoadedOk || cloudSyncInProgress || !cloudAutoSyncEnabled) return;
+                        _autoMarkDirty();
+                        if (Object.keys(_deltaQueue).length > 0 || (lastMetaSig !== null && metaSig() !== lastMetaSig)) autoSaveToCloud();
+                    } catch (e) { console.warn('v91 tick:', e); }
+                }
+                function schedule() { clearTimeout(tickT); tickT = setTimeout(tick, 600); }
+                var _sd = saveData;
+                saveData = function () { var r = _sd.apply(this, arguments); schedule(); return r; };
+                try {
+                    var _si = Storage.prototype.setItem;
+                    Storage.prototype.setItem = function (k) {
+                        var r = _si.apply(this, arguments);
+                        if (this === window.localStorage && /^(building_note_|building_notes_log_|al_oula_audit_log$|al_oula_users_v2$)/.test(String(k))) schedule();
+                        return r;
+                    };
+                } catch (e) {}
+                setInterval(function () { if (document.visibilityState !== 'hidden') tick(); }, 45000);
+
+                /* خط الأساس بعد كل تحميل + تطبيق ledger */
+                function baseline() {
+                    if (window._v91Ledger) { appData.investmentLedger = window._v91Ledger; window._v91Ledger = null; }
+                    extraSnap = buildExtra(); lastMetaSig = metaSig();
+                }
+                var _init = initializeData;
+                initializeData = async function () { var r = await _init.apply(this, arguments); try { baseline(); } catch (e) {} return r; };
+                var _msf = manualSyncFromCloud;
+                manualSyncFromCloud = async function () { var r = await _msf.apply(this, arguments); try { baseline(); } catch (e) {} return r; };
+
+                /* ④ "رفع للسحابة" = رفع كامل */
+                var _mp = manualPushToCloud;
+                manualPushToCloud = async function () { forceAll = true; try { return await _mp.apply(this, arguments); } finally { forceAll = false; } };
+
+                /* ⑥ تنبيه لسجل كبير فشل رفعه */
+                var _cs = cloudSet;
+                cloudSet = async function (key, value) {
+                    var ok = await _cs.apply(this, arguments);
+                    if (!ok && value !== null && value !== undefined) {
+                        try {
+                            var mb = JSON.stringify(value).length / 1048576;
+                            if (mb > 15 && typeof showCloudSaveNotification === 'function')
+                                showCloudSaveNotification('⚠️ تعذّر رفع سجل كبير (' + mb.toFixed(1) + ' MB) — حد السيرفر 25MB للطلب الواحد', 'error');
+                        } catch (e) {}
+                    }
+                    return ok;
+                };
+
+                console.log('%c☁️ v91: رفع فورى + مستخدمون/ملاحظات/سجل + مستثمرون + ledger + رفع كامل', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+        
+            /* ══════════════════════════════════════════════════════════════════
+               🛡️ v92 — سوبابيز هو الخلفية الوحيدة + المدير هو المرجع الوحيد للكتابة
+               • الموظف لا يكتب على السحابة: كل عملية (حجز/تسجيل/تحصيل/استلام تحويل/دفع نقدية)
+                 تُحوَّل إلى طلب al_oula_req_<id> ينتظر اعتماد المدير، ثم تعود بياناته المحلية لحالتها الأصلية.
+               • المدير: زر "طلبات الموظفين" → اعتماد (يُطبَّق ويُرفع فورًا) أو رفض.
+               • تنبيه: هذا حاجز فى الواجهة. الحماية الفعلية تتطلب RLS على سوبابيز.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v92Approvals() {
+                var REQ = 'al_oula_req_';
+                var TYPE_ARR = { region: 'regions', customer: 'customers', expense: 'expenses', extexp: 'externalExpenses', col: 'collections',
+                    invTx: 'investorTreasury', invProfile: 'investorProfiles', invest: 'investorInvestments', investTx: 'investmentTransactions', ledger: 'investmentLedger' };
+                var base = null, sending = false, pending = [];
+                function isAdmin() { return currentUser === 'admin'; }
+                function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+                function hdrs(x) { return Object.assign({ 'apikey': API_TOKEN, 'Authorization': 'Bearer ' + API_TOKEN }, x || {}); }
+
+                function snapBase() { try { base = JSON.stringify(appData); } catch (e) { base = null; } }
+                function restoreBase() {
+                    if (!base) return;
+                    var b = JSON.parse(base);
+                    Object.keys(appData).forEach(function (k) { if (!(k in b)) delete appData[k]; });
+                    Object.keys(b).forEach(function (k) { appData[k] = b[k]; });
+                    _deltaQueue = {}; _autoMarkDirty(); _deltaQueue = {};
+                    try { renderDashboard(); } catch (e) {}
+                }
+                var _init = initializeData;
+                initializeData = async function () { var r = await _init.apply(this, arguments); snapBase(); return r; };
+                var _msf = manualSyncFromCloud;
+                manualSyncFromCloud = async function () { var r = await _msf.apply(this, arguments); snapBase(); return r; };
+
+                /* الموظف يكمل العملية محليًا (لا كلمة سر مدير) — تُحوَّل لطلب عند الحفظ */
+                var _vap = verifyAdminPassword;
+                verifyAdminPassword = async function () { return isAdmin() ? _vap.apply(this, arguments) : true; };
+
+                function labelOf(items) {
+                    var c = items.filter(function (i) { return i.type === 'col' && !i.deleted; })[0];
+                    if (c) { var m = c.data && c.data.paymentMethod; return m === 'cash' ? '💵 دفع نقدية' : (m === 'wallet' || m === 'bank') ? '🏦 استلام تحويل' : '💰 تحصيل'; }
+                    var n = items.filter(function (i) { return i.type === 'customer' && !i.deleted; })[0];
+                    return n ? '📝 حجز / تسجيل عميل' : '✏️ تعديل بيانات';
+                }
+                async function sendRequest() {
+                    var keys = Object.keys(_deltaQueue);
+                    if (!keys.length || sending) return;
+                    sending = true;
+                    try {
+                        var items = keys.map(function (k) { var c = _deltaQueue[k]; return { type: c.type, id: c.id, deleted: !!c.deleted, data: c.deleted ? null : c.data }; });
+                        var pkg = { id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), by: (typeof currentUserName !== 'undefined' && currentUserName) || currentUser, at: new Date().toISOString(), label: labelOf(items), n: items.length, items: items };
+                        var r = await fetch(API_BASE_URL + '/rest/v1/' + API_TABLE, { method: 'POST', headers: hdrs({ 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' }), body: JSON.stringify({ key: REQ + pkg.id, value: JSON.stringify(pkg) }) });
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        restoreBase();
+                        alert('✅ أُرسل الطلب للمدير — ستظهر العملية بعد اعتماده.');
+                        refresh();
+                    } catch (e) { alert('⚠️ تعذّر إرسال الطلب — لم يضع شيء، أعد المحاولة.'); }
+                    finally { sending = false; }
+                }
+                var _sc = saveToCloud;
+                saveToCloud = async function () { return (isAdmin() || !currentUser) ? _sc.apply(this, arguments) : sendRequest(); };
+
+                /* ── قائمة الطلبات ── */
+                async function refresh() {
+                    if (!currentUser || !window._cloudLoadedOk) return;
+                    try {
+                        var r = await fetch(API_BASE_URL + '/rest/v1/' + API_TABLE + '?key=like.' + REQ + '*&select=key,value&limit=200', { headers: hdrs(), cache: 'no-store' });
+                        if (!r.ok) return;
+                        var me = (typeof currentUserName !== 'undefined' && currentUserName) || currentUser;
+                        pending = (await r.json()).map(function (x) { try { return JSON.parse(x.value); } catch (e) { return null; } })
+                            .filter(function (p) { return p && (isAdmin() || p.by === me); }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
+                    } catch (e) {}
+                    pill();
+                }
+                function pill() {
+                    var el = document.getElementById('v92-pill');
+                    if (!currentUser || !pending.length) { if (el) el.remove(); return; }   // صفر = لا شىء على الشاشة
+                    if (!el) {
+                        var top = 62; try { top = +localStorage.getItem('al_oula_v92_pill_top') || 62; } catch (e) {}
+                        el = document.createElement('div'); el.id = 'v92-pill';
+                        el.style.cssText = 'position:fixed;right:0;top:' + top + '%;z-index:2147482000;width:30px;height:30px;border-radius:15px 0 0 15px;background:var(--brand-green,#27ae60);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;opacity:.55;box-shadow:0 2px 8px rgba(0,0,0,.3);touch-action:none;user-select:none;';
+                        var sy = 0, st = 0, moved = false;   // قابل للسحب رأسيًا — يُحفظ مكانه
+                        el.onpointerdown = function (e) { sy = e.clientY; st = el.getBoundingClientRect().top; moved = false; try { el.setPointerCapture(e.pointerId); } catch (x) {} el.style.opacity = 1; };
+                        el.onpointermove = function (e) { var dy = e.clientY - sy; if (Math.abs(dy) > 5) moved = true; if (moved && e.buttons) el.style.top = Math.max(8, Math.min(innerHeight - 40, st + dy)) + 'px'; };
+                        el.onpointerup = function () { el.style.opacity = .55; if (moved) { try { localStorage.setItem('al_oula_v92_pill_top', (el.getBoundingClientRect().top / innerHeight * 100).toFixed(1)); } catch (x) {} } else openList(); };
+                        document.body.appendChild(el);
+                    }
+                    el.title = isAdmin() ? 'طلبات الموظفين — اسحبه لأى مكان' : 'طلباتي — اسحبه لأى مكان';
+                    el.innerHTML = (isAdmin() ? '📥' : '⏳') + '<span style="position:absolute;top:-6px;left:-4px;background:#c0392b;color:#fff;border-radius:9px;min-width:16px;height:16px;font:800 10px Arial;display:flex;align-items:center;justify-content:center;padding:0 3px;">' + pending.length + '</span>';
+                }
+                function openList() {
+                    var old = document.getElementById('v92-modal'); if (old) old.remove();
+                    var m = document.createElement('div'); m.id = 'v92-modal';
+                    if (!document.getElementById('v92-css')) { var st = document.createElement('style'); st.id = 'v92-css'; st.textContent = '@keyframes v92drop{from{transform:translateY(-40px);opacity:0}to{transform:none;opacity:1}}@keyframes v92up{from{transform:none;opacity:1}to{transform:translateY(-40px);opacity:0}}'; document.head.appendChild(st); }
+                    m.style.cssText = 'position:fixed;inset:0;z-index:2147483100;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;justify-content:center;padding-top:12px;direction:rtl;';
+                    function closeM() { var c = m.firstChild; if (c) c.style.animation = 'v92up .18s ease-in forwards'; setTimeout(function () { m.remove(); }, 170); }
+                    var h = '<div style="animation:v92drop .22s ease-out;background:#fff;color:#222;border-radius:14px;width:min(560px,94vw);max-height:80vh;overflow:auto;padding:16px;font-family:inherit;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><b style="font-size:15px;">' + (isAdmin() ? 'طلبات بانتظار اعتمادك' : 'طلباتي المعلّقة') + '</b><button id="v92-x" style="border:none;background:none;font-size:20px;cursor:pointer;">✕</button></div>';
+                    if (!pending.length) h += '<p style="color:#777;text-align:center;padding:20px 0;">لا توجد طلبات معلّقة.</p>';
+                    pending.forEach(function (p, i) {
+                        h += '<div style="border:1px solid #e3e3e3;border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-weight:800;">' + esc(p.label) + '</div>' +
+                            '<div style="font-size:12px;color:#666;margin:3px 0 8px;">من: ' + esc(p.by) + ' — ' + new Date(p.at).toLocaleString('ar-EG') + ' — ' + p.n + ' عنصر</div>' +
+                            (isAdmin() ? '<button data-a="ok" data-i="' + i + '" style="background:var(--brand-green,#27ae60);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-weight:800;cursor:pointer;margin-left:6px;">اعتماد</button>' +
+                                '<button data-a="no" data-i="' + i + '" style="background:#c0392b;color:#fff;border:none;border-radius:8px;padding:7px 16px;font-weight:800;cursor:pointer;">رفض</button>' : '<span style="font-size:12px;color:#e67e22;">بانتظار المدير</span>') + '</div>';
+                    });
+                    m.innerHTML = h + '</div>';
+                    m.onclick = function (e) {
+                        if (e.target === m || e.target.id === 'v92-x') return closeM();
+                        var a = e.target.getAttribute && e.target.getAttribute('data-a'); if (a) decide(pending[+e.target.getAttribute('data-i')], a === 'ok', m);
+                    };
+                    document.body.appendChild(m);
+                }
+                async function decide(p, ok, modal) {
+                    if (!p || !isAdmin()) return;
+                    if (!ok && !confirm('رفض هذا الطلب؟ لن تُنفَّذ العملية.')) return;
+                    try {
+                        if (ok) {
+                            p.items.forEach(function (it) {
+                                var f = TYPE_ARR[it.type]; if (!f) return;
+                                var arr = appData[f] = appData[f] || [], ix = arr.findIndex(function (x) { return x && x._id === it.id; });
+                                if (it.deleted) { if (ix >= 0) arr.splice(ix, 1); markDeleted(it.type, it.id); }
+                                else { if (ix >= 0) arr[ix] = it.data; else arr.push(it.data); markDirty(it.type, it.data); }
+                            });
+                            try { invalidatePaymentCache(); } catch (e) {}
+                            await autoSaveToCloud();
+                            if (Object.keys(_deltaQueue).length) { alert('⚠️ تعذّر الرفع الآن — الطلب باقٍ، أعد الاعتماد.'); return; }
+                        }
+                        await cloudSet(REQ + p.id, null);
+                        try { logAudit(ok ? 'اعتماد طلب موظف' : 'رفض طلب موظف', 'صلاحيات', p.label + ' — ' + p.by, {}); } catch (e) {}
+                        snapBase(); try { renderDashboard(); } catch (e) {}
+                        if (modal.parentNode) modal.remove(); await refresh();
+                    } catch (e) { alert('⚠️ تعذّر تنفيذ القرار — أعد المحاولة.'); }
+                }
+                setInterval(refresh, 30000);
+                window.addEventListener('load', function () { setTimeout(refresh, 3000); });
+                console.log('%c🛡️ v92: سوبابيز وحده + طلبات الموظفين تنتظر اعتماد المدير', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+        
+            /* ══════════════════════════════════════════════════════════════════
+               ✨ v93 — شاشة دخول أرقى بهوية الشركة (أحمر داكن + ذهبى) + حركات ناعمة
+               • حذف كلمة (مدير/مستخدم) من القائمة — يظهر الاسم فقط. لا تغيير فى منطق الدخول.
+               • أفاتار يتحرك عند اختيار الاسم، دخول متدرّج للعناصر، هزّة عند الخطأ، ويحترم تقليل الحركة.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v93Login() {
+                var css = '' +
+                '@keyframes v93rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}' +
+                '@keyframes v93float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}' +
+                '@keyframes v93ring{0%{box-shadow:0 0 0 0 rgba(214,168,79,.45)}100%{box-shadow:0 0 0 16px rgba(214,168,79,0)}}' +
+                '@keyframes v93drift{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(30px,-24px) scale(1.12)}}' +
+                '@keyframes v93pop{0%{transform:scale(.6);opacity:.3}70%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}' +
+                '@keyframes v93shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}' +
+                '@keyframes v93shine{from{transform:translateX(-120%)}to{transform:translateX(220%)}}' +
+                '#login-screen{overflow:hidden}' +
+                '#login-screen::before,#login-screen::after{content:"";position:absolute;border-radius:50%;pointer-events:none;filter:blur(40px);animation:v93drift 14s ease-in-out infinite}' +
+                '#login-screen::before{width:280px;height:280px;left:-70px;top:-50px;background:rgba(214,168,79,.20)}' +
+                '#login-screen::after{width:340px;height:340px;right:-110px;bottom:-90px;background:rgba(255,255,255,.10);animation-delay:-6s}' +
+                '#login-screen .login-box{position:relative;z-index:1;animation:v93rise .7s cubic-bezier(.2,.8,.2,1) both}' +
+                '#login-screen .login-box.v93-shake{animation:v93shake .45s ease}' +
+                '#login-screen .login-box::before{content:"";position:absolute;top:0;left:28px;right:28px;height:3px;border-radius:0 0 4px 4px;background:linear-gradient(90deg,transparent,#d6a84f,transparent)}' +
+                '#login-screen .login-box img{animation:v93float 5s ease-in-out infinite,v93ring 2.6s ease-out infinite}' +
+                '#login-screen .login-box h2{letter-spacing:.2px}' +
+                '.v93-sub{margin:-12px 0 18px;color:#8a7f7f;font-size:13px;animation:v93rise .6s .15s both}' +
+                '#login-form>*{animation:v93rise .55s cubic-bezier(.2,.8,.2,1) both}' +
+                '#login-form>*:nth-child(2){animation-delay:.08s}#login-form>*:nth-child(3){animation-delay:.16s}#login-form>*:nth-child(4){animation-delay:.24s}#login-form>*:nth-child(5){animation-delay:.32s}' +
+                '#v93-avatar{width:64px;height:64px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font:900 26px inherit;' +
+                  'background:linear-gradient(135deg,#641919,#a92727);border:3px solid #d6a84f;box-shadow:0 8px 20px rgba(139,26,26,.28);transition:transform .25s}' +
+                '#v93-avatar.v93-pop{animation:v93pop .38s ease-out}' +
+                '#v93-avatar svg{width:30px;height:30px;fill:rgba(255,255,255,.85)}' +
+                '#login-screen select.login-input{appearance:none;-webkit-appearance:none;cursor:pointer;text-align:center;text-align-last:center;padding-inline:38px;' +
+                  'background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'14\' height=\'14\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%238b1a1a\' stroke-width=\'3\' stroke-linecap=\'round\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E");' +
+                  'background-repeat:no-repeat;background-position:left 14px center}' +
+                '#login-screen .login-input{transition:border-color .2s,box-shadow .2s,transform .2s}' +
+                '#login-screen .login-input:focus{transform:translateY(-1px);border-color:#d6a84f!important;box-shadow:0 0 0 4px rgba(214,168,79,.20)!important;outline:none}' +
+                '#login-screen .login-btn{position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;letter-spacing:.5px}' +
+                '#login-screen .login-btn::after{content:"";position:absolute;top:0;bottom:0;width:40%;left:0;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:translateX(-120%)}' +
+                '#login-screen .login-btn:hover::after{animation:v93shine .8s ease}' +
+                '#login-screen .login-btn:active{transform:scale(.98)}' +
+                '@media (prefers-reduced-motion:reduce){#login-screen *,#login-screen::before,#login-screen::after{animation:none!important;transition:none!important}}';
+                var st = document.createElement('style'); st.id = 'v93-login'; st.textContent = css; document.head.appendChild(st);
+
+                /* القائمة: الاسم فقط */
+                function tidy() {
+                    var sel = document.getElementById('user-type'); if (!sel) return;
+                    Array.prototype.forEach.call(sel.options, function (o) {
+                        if (!o.value) { o.textContent = 'اختر اسمك'; return; }
+                        var u = (appUsers || []).filter(function (x) { return String(x.id) === o.value; })[0];
+                        if (u) o.textContent = u.name;
+                    });
+                }
+                var _pl = populateLoginDropdown;
+                populateLoginDropdown = function () { var r = _pl.apply(this, arguments); try { tidy(); } catch (e) {} return r; };
+
+                /* عناصر الشاشة: عنوان فرعى + أفاتار + هزّة الخطأ */
+                var USER_SVG = '<svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>';
+                function decorate() {
+                    var box = document.querySelector('#login-screen .login-box'), form = document.getElementById('login-form'), sel = document.getElementById('user-type');
+                    if (!box || !form || !sel || document.getElementById('v93-avatar')) return;
+                    var h2 = box.querySelector('h2');
+                    if (h2) { var p = document.createElement('p'); p.className = 'v93-sub'; p.textContent = 'اختر اسمك وأدخل كلمة السر'; h2.insertAdjacentElement('afterend', p); }
+                    var av = document.createElement('div'); av.id = 'v93-avatar'; av.innerHTML = USER_SVG; form.insertBefore(av, form.firstChild);
+                    sel.addEventListener('change', function () {
+                        var t = sel.value ? sel.options[sel.selectedIndex].textContent.trim() : '';
+                        av.innerHTML = t ? '' : USER_SVG; av.textContent = t ? t.charAt(0).toUpperCase() : ''; if (!t) av.innerHTML = USER_SVG;
+                        av.classList.remove('v93-pop'); void av.offsetWidth; av.classList.add('v93-pop');
+                    });
+                    var err = document.getElementById('login-error');
+                    if (err) new MutationObserver(function () {
+                        if (err.style.display !== 'none') { box.classList.remove('v93-shake'); void box.offsetWidth; box.classList.add('v93-shake'); }
+                    }).observe(err, { attributes: true, attributeFilter: ['style'] });
+                    tidy();
+                }
+                decorate();
+                console.log('%c✨ v93: شاشة دخول جديدة (الاسم فقط + حركات)', 'color:#1565c0;font-weight:bold;font-size:13px');
             })();
 
         </script>
