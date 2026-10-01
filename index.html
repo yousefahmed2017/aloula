@@ -11,7 +11,7 @@
         <meta name="description" content="نظام إدارة عقارات شركة الأولى">
         <link rel="manifest" href="manifest.json">
         <link rel="apple-touch-icon" href="icon-192.png">
-        <title>الأولى للتطوير العقاري</title>
+        <title>الأولى للتطوير العقاري — v12</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
@@ -37666,7 +37666,7 @@ async function processInstallments(editIndex) {
                 var overdueWithFees = ledger.timeline.filter(function(t) { return t.type === 'installment' && t.status === 'overdue' && t.lateFee > 0; });
                 if (overdueWithFees.length > 0) {
                     html += '<div class="installment-card" style="border-right:4px solid #e74c3c;margin-bottom:15px;">' +
-                        '<h3 style="color:#e74c3c;margin:0 0 10px;"><i class="fas fa-exclamation-triangle"></i> غرامات التأخير (نسبة ' + (appData.settings.lateFeeRate) + '%/يوم بعد ' + appData.settings.gracePeriodDays + ' أيام سماح)</h3>' +
+                        '<h3 style="color:#e74c3c;margin:0 0 10px;"><i class="fas fa-exclamation-triangle"></i> غرامات التأخير (نسبة ' + (appData.settings.lateFeeRate) + '%/يوم بعد ' + ((appData.customers[customerIndex] || {}).lateGraceDays != null && (appData.customers[customerIndex] || {}).lateGraceDays !== '' ? appData.customers[customerIndex].lateGraceDays : appData.settings.gracePeriodDays) + ' أيام سماح)</h3>' +
                         '<div class="table-scroll-wrap"><table class="res-table"><thead><tr><th>القسط</th><th>تاريخ الاستحقاق</th><th>المتبقي</th><th>الغرامة المحسوبة</th><th>إجراء</th></tr></thead><tbody>' +
                         overdueWithFees.map(function(t) {
                             return '<tr style="background:#ffe8e8;"><td>' + t.label + '</td><td>' + t.date + '</td><td>' + t.remaining.toLocaleString() + '</td>' +
@@ -45323,7 +45323,7 @@ async function processInstallments(editIndex) {
                 var FIELD_AR = { name: 'الاسم', customerName: 'العميل', amount: 'المبلغ', date: 'التاريخ', time: 'الوقت', type: 'النوع', status: 'الحالة',
                     paymentMethod: 'طريقة الدفع', accountName: 'الحساب', receiptNumber: 'رقم الإيصال', receiptNotes: 'ملاحظات الاستلام', receiptImage: 'صورة التحويل',
                     reason: 'السبب', deductionReason: 'سبب التنزيل', building: 'العمارة', unit: 'الوحدة', region: 'المنطقة', phone: 'الهاتف', notes: 'ملاحظات',
-                    title: 'البيان', description: 'الوصف', price: 'السعر', total: 'الإجمالى', category: 'التصنيف', paid: 'المدفوع', appliedInstallments: 'توزيع الأقساط' };
+                    title: 'البيان', description: 'الوصف', price: 'السعر', total: 'الإجمالى', category: 'التصنيف', paid: 'المدفوع', lateGraceDays: 'أيام بدء الغرامة', appliedInstallments: 'توزيع الأقساط' };
                 var CATS = { collect: 'تحصيل', booking: 'حجز / تسجيل عميل', expense: 'مصروفات', edit: 'تعديل بيانات', delete: 'حذف', investor: 'المستثمرون' };
                 var base = null, sending = false, pending = [], perms = {}, elev = null;
 
@@ -45865,6 +45865,51 @@ async function processInstallments(editIndex) {
                 };
                 window._v96dbg = { COLS: COLS, localPool: localPool, fetchOne: fetchOne, fetchCol: fetchCol };
                 console.log('%c♻️ v96: استرجاع السجلات الناقصة (sahab_ القديم + الكاش المحلى)', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+            /* ══════════════════════════════════════════════════════════════════
+               ⏱️ v97 — بدء احتساب الغرامة لكل عميل (أيام سماح يحددها المدير بنفسه)
+               • زر "⏱️ بدء الغرامة" بجانب "فسخ العقد" فى تفاصيل العميل: عدد الأيام بعد الاستحقاق قبل بدء الغرامة.
+               • فارغ = الافتراضى العام (appData.settings.gracePeriodDays). القيمة تُحفظ على سجل العميل (c.lateGraceDays) وتُرفع للسحابة.
+               • calcLateFee لا تتغير معادلتها (المتبقى × النسبة × الأيام المحتسبة)؛ فقط أيام السماح تُؤخذ من العميل إن وُجدت.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v97LateFeeStart() {
+                function custGrace(c) { return (c && c.lateGraceDays != null && c.lateGraceDays !== '' && !isNaN(+c.lateGraceDays)) ? +c.lateGraceDays : null; }
+                var _clf = calcLateFee;
+                calcLateFee = function (customerIndex, installment) {
+                    var g = custGrace(appData.customers[customerIndex]);
+                    if (g === null) return _clf.apply(this, arguments);
+                    var s = appData.settings || (appData.settings = {}), old = s.gracePeriodDays;
+                    s.gracePeriodDays = g;
+                    try { return _clf.apply(this, arguments); } finally { s.gracePeriodDays = old; }   // متزامن: يُعاد فورًا
+                };
+                window.v97EditGrace = async function (ci) {
+                    var c = appData.customers[ci]; if (!c) return;
+                    if (!(await verifyAdminPassword('تعديل بدء احتساب الغرامة'))) return;
+                    var def = (appData.settings && appData.settings.gracePeriodDays) || 0, cur = custGrace(c);
+                    var v = await asyncPrompt('⏱️ عدد الأيام بعد تاريخ الاستحقاق قبل بدء احتساب الغرامة على ' + c.name + '\n(اتركه فارغًا للرجوع للافتراضى العام: ' + def + ' أيام)', cur === null ? '' : cur);
+                    if (v === null) return;
+                    v = String(v).trim();
+                    if (v === '') c.lateGraceDays = null;
+                    else { var n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 3650 || String(n) !== v) return alert('❌ أدخل عدد أيام صحيحًا (0 أو أكثر).'); c.lateGraceDays = n; }
+                    markDirty('customer', c); saveData();
+                    try { logAudit('تعديل بدء احتساب الغرامة', 'عملاء', c.name + ' — ' + (c.lateGraceDays == null ? 'الافتراضى العام (' + def + ' أيام)' : c.lateGraceDays + ' يوم بعد الاستحقاق'), {}); } catch (e) {}
+                    alert(c.lateGraceDays == null ? '✅ عاد للافتراضى العام (' + def + ' أيام).' : '✅ ستبدأ الغرامة بعد ' + c.lateGraceDays + ' يوم من تاريخ الاستحقاق.');
+                    viewCustomerDetail(ci);
+                };
+                function inject() {
+                    document.querySelectorAll('button[onclick*="editContractCancellation"]').forEach(function (b) {
+                        if (b.parentNode.querySelector('.v97-btn')) return;
+                        var m = /editContractCancellation\((\d+)\)/.exec(b.getAttribute('onclick') || ''); if (!m) return;
+                        var n = b.cloneNode(false); n.className = (b.className ? b.className + ' ' : '') + 'v97-btn';
+                        n.setAttribute('onclick', 'v97EditGrace(' + m[1] + ')'); n.style.background = '#2c3e50';
+                        var ic = b.querySelector('i'); n.innerHTML = '⏱️ بدء الغرامة';
+                        b.parentNode.insertBefore(n, b.nextSibling);
+                    });
+                }
+                var t = null;
+                new MutationObserver(function () { clearTimeout(t); t = setTimeout(inject, 100); }).observe(document.body, { childList: true, subtree: true });
+                console.log('%c⏱️ v97: بدء احتساب الغرامة لكل عميل', 'color:#1565c0;font-weight:bold;font-size:13px');
             })();
 
         </script>
