@@ -11,7 +11,7 @@
         <meta name="description" content="نظام إدارة عقارات شركة الأولى">
         <link rel="manifest" href="manifest.json">
         <link rel="apple-touch-icon" href="icon-192.png">
-        <title>الأولى للتطوير العقاري — v12</title>
+        <title>الأولى للتطوير العقاري التجريبى</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
@@ -25360,7 +25360,7 @@ div[style*="position:fixed"][style*="bottom:14px"],div[style*="position: fixed"]
                         // محاولة Fallback من localStorage
                         try {
                             const regionsStr = localStorage.getItem('al_oula_regions');
-                            if (regionsStr && confirm('⚠️ تعذّر الاتصال بالسحابة.\nهل تريد المتابعة ببيانات محلية قديمة مخزّنة على هذا الجهاز (قد تكون غير محدثة)؟')) {
+                            if (!AL_OULA_CLOUD_ONLY && regionsStr && confirm('⚠️ تعذّر الاتصال بالسحابة.\nهل تريد المتابعة ببيانات محلية قديمة مخزّنة على هذا الجهاز (قد تكون غير محدثة)؟')) {
                                 console.log('✅ وجدنا بيانات محلية! جاري الاستعادة...');
                                 appData.regions = JSON.parse(regionsStr) || [];
                                 appData.customers = JSON.parse(localStorage.getItem('al_oula_customers') || '[]');
@@ -28522,6 +28522,7 @@ async function processInstallments(editIndex) {
                     '<div><span class="field-label">🧾 رقم إذن الصرف</span><input type="text" id="exAuthNumber" class="installment-input" placeholder="اختياري - رقم إذن الصرف الورقي"></div>' +
                     '<div><span class="field-label">📝 ملاحظات الصرف</span><input type="text" id="exAuthNotes" class="installment-input" placeholder="أي ملاحظات على هذا الصرف"></div>' +
                     '</div>' +
+                    '<label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-weight:bold;cursor:pointer;"><input type="checkbox" id="exGeneral" onchange="v98ToggleGeneral()"> 🏷️ مصروف عام للخزينة (غير مرتبط بعمارة)</label>' +
                     '<button onclick="addExpense()" style="width:100%;padding:10px;background:var(--brand-red);color:white;border:none;border-radius:10px;margin-top:10px;cursor:pointer;font-weight:bold;">إضافة مصروف</button></div>';
 
                 // فلترة المصروفات
@@ -29835,8 +29836,10 @@ async function processInstallments(editIndex) {
                 var accountName = accountInfo ? accountInfo.name : null;
 
                 if (!amount) return alert("أدخل المبلغ");
-                if (!region) return alert("اختر المنطقة");
-                if (!building) return alert("اختر العمارة");
+                var generalExp = !!(document.getElementById('exGeneral') && document.getElementById('exGeneral').checked); // ✅ v98: مصروف عام للخزينة (غير مرتبط بعمارة)
+                if (generalExp) { region = ''; building = ''; }
+                if (!generalExp && !region) return alert("اختر المنطقة");
+                if (!generalExp && !building) return alert("اختر العمارة");
 
                 // ✅ v18: تنبيه (وليس منع تلقائي) لو فيه مصروف مطابق تمامًا اليوم — لتفادي الضغط المزدوج بالخطأ
                 var todayStr18 = new Date().toISOString().split('T')[0];
@@ -34742,7 +34745,7 @@ async function processInstallments(editIndex) {
                             if (!unit.status) {
                                 // البحث عن عميل لهذه الوحدة
                                 var hasCustomer = appData.customers.some(function(c) {
-                                    return c.building === building.name && c.unit === unit.code;
+                                    return !c.cancelled && c.building === building.name && c.unit === unit.code;
                                 });
                                 unit.status = hasCustomer ? 'sold' : 'available';
                                 fixed = true;
@@ -44260,7 +44263,8 @@ async function processInstallments(editIndex) {
                         overdue: r2(led.totalOverdue), lateFees: r2(lateFees),
                         nextDueDate: led.nextDueDate || null, nextDueAmount: r2(led.nextDueAmount),
                         lastPaymentDate: led.lastPaymentDate || null, lastPaymentAmount: r2(led.lastPaymentAmount),
-                        installments: insts, payments: pays
+                        installments: insts, payments: pays,
+                        cancelled: !!c.cancelled   // ✅ v98: علامة فسخ العقد للبورتال (إضافة فقط)
                     };
                 }
 
@@ -44928,6 +44932,7 @@ async function processInstallments(editIndex) {
                 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') _flushOnHide(); });
 
                 async function restorePending() {
+                    if (AL_OULA_CLOUD_ONLY) { restored = []; return; }   // v100: لا شىء من الكاش يعود للسحابة
                     var rec = await idbGet(PENDING_KEY);
                     restored = (rec && rec.items && rec.items.length) ? rec.items : [];
                 }
@@ -45384,7 +45389,7 @@ async function processInstallments(editIndex) {
                     return items.some(function (i) { return i.type === 'customer' && i.act === 'add'; }) ? '📝 حجز / تسجيل عميل' : '✏️ تعديل بيانات';
                 }
                 var ACT = { add: 'إضافة', edit: 'تعديل', delete: 'حذف' };
-                function lineOf(p) { return 'الموظف ' + p.by + ' طلب: ' + p.label + ' — ' + p.lines.slice(0, 6).join('؛ ') + (p.lines.length > 6 ? '…' : ''); }
+                function lineOf(p) { var ls = p.lines || []; return 'الموظف ' + p.by + ' طلب: ' + p.label + ' — ' + ls.slice(0, 6).join('؛ ') + (ls.length > 6 ? '…' : ''); }
                 function fmt(v) {
                     if (v == null || v === '') return '—';
                     if (typeof v === 'string' && v.indexOf('data:image') === 0) return '<img src="' + v + '" style="height:60px;border-radius:6px;border:1px solid #ddd;vertical-align:middle;">';
@@ -45392,7 +45397,21 @@ async function processInstallments(editIndex) {
                     return esc(v);
                 }
                 function tr(a, b) { return '<tr><td style="padding:3px 8px;color:#666;white-space:nowrap;vertical-align:top;">' + esc(FIELD_AR[a] || a) + '</td><td style="padding:3px 8px;">' + b + '</td></tr>'; }
+                function hydrate(it) {   // طلبات أُرسلت بنسخ قديمة: نستنتج (إضافة/تعديل/حذف) والفروق من بيانات المدير الحالية
+                    if (it.act) return it;
+                    var o = Object.assign({}, it), cur = ((appData[TYPE_ARR[it.type]]) || []).filter(function (x) { return x && x._id === it.id; })[0];
+                    if (it.deleted) { o.act = 'delete'; o.old = flat(cur); }
+                    else if (cur) {
+                        o.act = 'edit'; o.diff = {};
+                        Object.keys(it.data || {}).forEach(function (k) { if (k !== 'updatedAt' && k !== '_id' && JSON.stringify(cur[k]) !== JSON.stringify(it.data[k])) o.diff[k] = { o: short(cur[k]), n: short(it.data[k]) }; });
+                        Object.keys(cur).forEach(function (k) { if (k !== 'updatedAt' && k !== '_id' && !(k in (it.data || {}))) o.diff[k] = { o: short(cur[k]), n: null }; });
+                    } else o.act = 'add';
+                    o.name = nameOf(it.data) || nameOf(cur);
+                    return o;
+                }
+                function noop(p) { return (p.items || []).length > 0 && (p.items || []).map(hydrate).every(function (h) { return h.act === 'edit' && !Object.keys(h.diff || {}).length; }); }
                 function itemHtml(it) {
+                    it = hydrate(it);
                     var rows = '', f;
                     if (it.act === 'edit') { for (f in (it.diff || {})) rows += tr(f, '<span style="color:#c0392b;text-decoration:line-through;">' + fmt(it.diff[f].o) + '</span> ← <b style="color:#27ae60;">' + fmt(it.diff[f].n) + '</b>'); if (!rows) rows = tr('—', 'لا فروق ظاهرة'); }
                     else { var src = it.act === 'add' ? flat(it.data) : (it.old || {}); for (f in src) rows += tr(f, fmt(src[f])); }
@@ -45406,7 +45425,8 @@ async function processInstallments(editIndex) {
                     if (!Object.keys(_deltaQueue).length || sending) return;
                     sending = true;
                     try {
-                        var items = buildItems(), denied = [], pm = perms[me()];
+                        var items = buildItems().filter(function (it) { return !(it.act === 'edit' && !Object.keys(it.diff || {}).length); }), denied = [], pm = perms[me()];
+                        if (!items.length) { _deltaQueue = {}; return; }   // لا تغيير فعلى = لا طلب
                         items.forEach(function (it) { var c = catOf(it); if (pm && pm[c] === false && denied.indexOf(c) < 0) denied.push(c); });
                         if (denied.length) { restoreBase(); alert('⛔ غير مسموح لحسابك: ' + denied.map(function (c) { return CATS[c]; }).join('، ') + ' — تواصل مع المدير.'); return; }
                         var pkg = { id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), by: me(), at: new Date().toISOString(), label: labelOf(items), n: items.length, items: items,
@@ -45440,7 +45460,8 @@ async function processInstallments(editIndex) {
                         var r = await fetch(API_BASE_URL + '/rest/v1/' + API_TABLE + '?key=like.' + REQ + '*&select=key,value&limit=200', { headers: hdrs(), cache: 'no-store' });
                         if (r.ok) {
                             pending = (await r.json()).map(function (x) { try { return JSON.parse(x.value); } catch (e) { return null; } })
-                                .filter(function (p) { return p && (isAdmin() || p.by === me()); }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
+                                .map(function (p) { if (p && !p.lines) p.lines = (p.items || []).map(function (it) { var h = hydrate(it); return ACT[h.act] + ' ' + (TYPE_AR[h.type] || h.type) + (h.name ? ' (' + h.name + ')' : ''); }); return p; })
+                                .filter(function (p) { return p && !p.status && (isAdmin() || p.by === me()); }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
                             if (isAdmin()) logNew();
                         }
                         if (!isAdmin()) await notifyDecisions();
@@ -45493,7 +45514,7 @@ async function processInstallments(editIndex) {
                     pending.forEach(function (p, i) {
                         h += '<div style="border:1px solid #e3e3e3;border-radius:10px;padding:10px;margin-bottom:10px;"><div style="font-weight:800;font-size:14px;">' + esc(p.label) + '</div>' +
                             '<div style="font-size:12px;color:#666;margin:3px 0 6px;">من: ' + esc(p.by) + ' — ' + new Date(p.at).toLocaleString('ar-EG') + ' — ' + p.n + ' عنصر</div>' +
-                            (p.items || []).map(itemHtml).join('') +
+                            ((p.items || []).length ? (noop(p) ? '<div style="background:#fff3cd;border-radius:8px;padding:6px 10px;font-size:12px;color:#856404;margin:4px 0;">⚠️ لا توجد فروق فعلية عن البيانات الحالية — غالباً طلب تلقائى بلا تغيير حقيقى، يُنصح برفضه.</div>' : '') + (p.items || []).map(itemHtml).join('') : '<div style="background:#fdecea;border-radius:8px;padding:6px 10px;font-size:12px;color:#c0392b;margin:4px 0;">⚠️ لا تتوفر تفاصيل لهذا الطلب (أُرسل بنسخة قديمة). ارفضه واطلب من الموظف إعادة الإرسال.</div>') +
                             (isAdmin() ? '<div style="margin-top:8px;"><button data-a="ok" data-i="' + i + '" style="background:var(--brand-green,#27ae60);color:#fff;border:none;border-radius:8px;padding:7px 18px;font-weight:800;cursor:pointer;margin-left:6px;">اعتماد</button>' +
                                 '<button data-a="no" data-i="' + i + '" style="background:#c0392b;color:#fff;border:none;border-radius:8px;padding:7px 18px;font-weight:800;cursor:pointer;">رفض</button></div>' : '<div style="font-size:12px;color:#e67e22;margin-top:6px;">بانتظار المدير</div>') + '</div>';
                     });
@@ -45521,7 +45542,8 @@ async function processInstallments(editIndex) {
                             if (Object.keys(_deltaQueue).length) { alert('⚠️ تعذّر الرفع الآن — الطلب باقٍ، أعد الاعتماد.'); return; }
                         }
                         await cloudSet(HIST + p.id, { id: p.id, by: p.by, at: p.at, label: p.label, n: p.n, lines: p.lines, status: ok ? 'approved' : 'rejected', why: why || '', decidedBy: me(), decidedAt: new Date().toISOString() });
-                        await cloudSet(REQ + p.id, null);
+                        await cloudSet(REQ + p.id, { id: p.id, by: p.by, at: p.at, label: p.label, n: p.n, items: [], status: ok ? 'approved' : 'rejected', decidedBy: me(), decidedAt: new Date().toISOString() });   // علامة قرار: تعمل حتى لو صلاحية الحذف محجوبة (RLS)
+                        try { await cloudSet(REQ + p.id, null, 1); } catch (e) {}   // حذف فعلى إن سُمح
                         try { logAudit(ok ? 'اعتماد طلب موظف' : 'رفض طلب موظف', 'صلاحيات', lineOf(p) + ' — القرار: ' + me() + (why ? ' — السبب: ' + why : '') + ' [req:' + p.id + ':decision]', { requestId: p.id, employee: p.by, decision: ok ? 'approved' : 'rejected' }); } catch (e) {}
                         snapBase(); try { renderDashboard(); } catch (e) {}
                         if (m.parentNode) m.remove(); await refresh();
@@ -45605,7 +45627,7 @@ async function processInstallments(editIndex) {
                 }
                 var ot = null;
                 new MutationObserver(function () { clearTimeout(ot); ot = setTimeout(function () { injectPermBtn(); injectSideBtn(); }, 150); }).observe(document.body, { childList: true, subtree: true });
-                window._v95dbg = { setPending: function (a) { pending = a; pill(); }, snapBase: snapBase, buildItems: buildItems, catOf: catOf, itemHtml: itemHtml, sendRequest: sendRequest, setPerms: function (p) { perms = p; } };
+                window._v95dbg = { refresh: refresh, decide: decide, getPending: function () { return pending; }, setPending: function (a) { pending = a; pill(); }, snapBase: snapBase, buildItems: buildItems, catOf: catOf, itemHtml: itemHtml, sendRequest: sendRequest, setPerms: function (p) { perms = p; } };
                 setInterval(refresh, 10000);
                 window.addEventListener('load', function () { setTimeout(refresh, 3000); });
                 console.log('%c🛡️ v95: سوبابيز وحده + طلبات مفصّلة + سجل أحداث + صلاحيات الموظفين', 'color:#1565c0;font-weight:bold;font-size:13px');
@@ -45848,7 +45870,7 @@ async function processInstallments(editIndex) {
                             var miss = ids.filter(function (id) { return !have[id]; });
                             for (var i = 0; i < miss.length; i++) {
                                 var id = miss[i], v = await fetchOne(id, col.prefixes.slice(1)), how = 'legacy';
-                                if (v === null || v === undefined) { pool = pool || await localPool(); v = pool.byId[id] || null; how = 'local'; }
+                                if ((v === null || v === undefined) && !AL_OULA_CLOUD_ONLY) { pool = pool || await localPool(); v = pool.byId[id] || null; how = 'local'; }
                                 if (v) {
                                     arr.push(v); if (how === 'legacy') legacy++; else recovered++;
                                     if (admin) _deltaQueue[col.type + '_' + id] = { type: col.type, id: id, data: v };
@@ -45910,6 +45932,227 @@ async function processInstallments(editIndex) {
                 var t = null;
                 new MutationObserver(function () { clearTimeout(t); t = setTimeout(inject, 100); }).observe(document.body, { childList: true, subtree: true });
                 console.log('%c⏱️ v97: بدء احتساب الغرامة لكل عميل', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+            /* ══════════════════════════════════════════════════════════════════
+               💸 v98 — رد مبلغ فسخ العقد كمصروف من الخزينة (نقدى/محفظة/بنك) + مصروف عام غير مرتبط بعمارة
+               • غرامة الفسخ = حقل "القيمة المستردة" الحالى (لا يتغير معناه ولا حساب المستثمرين).
+               • المستحق رده = المسدد − الغرامة. الردّ دفعة أو دفعات؛ كل دفعة تُسجَّل مصروفًا ببند "فسخ عقد" بلا عمارة.
+               • المردود يُحسب من المصروفات نفسها (حذف المصروف يعيد المتبقى تلقائيًا). الباقى (الغرامة) ربح للشركة.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v98CancelRefund() {
+                function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+                function money(n) { return (Math.round((+n || 0) * 100) / 100).toLocaleString(); }
+                var METHODS = { cash: '💵 نقدى', wallet: '📱 محفظة إلكترونية', bank: '🏦 حساب بنكى' };
+
+                function stats(ci) {
+                    var c = appData.customers[ci]; if (!c) return null;
+                    var led = null; try { led = getCustomerLedger(ci); } catch (e) {}
+                    var paid = led ? Math.round((led.totalCollected || 0) * 100) / 100 : 0, pen = +c.recoveredValue || 0;
+                    var due = Math.max(0, Math.round((paid - pen) * 100) / 100), cid = c._id;
+                    var list = (appData.expenses || []).filter(function (e) { return e && cid && e.refundCustomerId === cid; });
+                    var done = list.reduce(function (s, e) { return s + (+e.amount || 0); }, 0);
+                    return { c: c, paid: paid, pen: pen, due: due, list: list, done: done, left: Math.max(0, Math.round((due - done) * 100) / 100) };
+                }
+                function panelHtml(ci) {
+                    var s = stats(ci), cell = function (l, v, col) { return '<span>' + l + ': <b style="color:' + (col || '#333') + ';">' + money(v) + '</b></span>'; };
+                    var h = '<div id="v98-refund" style="margin-top:10px;padding:10px 12px;background:#fff8e1;border:1px solid #ffe0a3;border-radius:8px;font-size:13px;">' +
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px 18px;">' + cell('المسدد', s.paid) + cell('غرامة الفسخ (ربح للشركة)', s.pen, '#27ae60') + cell('المستحق رده للعميل', s.due, '#c0392b') + cell('تم رده', s.done, '#2980b9') + cell('المتبقى', s.left, s.left > 0 ? '#e67e22' : '#27ae60') + '</div>';
+                    if (s.list.length) h += '<div style="margin-top:6px;font-size:12px;color:#555;">' + s.list.map(function (e) { return '• ' + esc(e.date) + ' — ' + money(e.amount) + ' (' + esc(METHODS[e.paymentMethod] || e.paymentMethod) + (e.accountName ? ' — ' + esc(e.accountName) : '') + ')'; }).join('<br>') + '</div>';
+                    return h + '<button type="button" onclick="v98Refund(' + ci + ')" style="margin-top:8px;padding:7px 16px;background:#e67e22;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;">💸 رد مبلغ للعميل</button></div>';
+                }
+                function inject() {
+                    document.querySelectorAll('button[onclick*="editContractCancellation"]').forEach(function (b) {
+                        var m = /editContractCancellation\((\d+)\)/.exec(b.getAttribute('onclick') || ''); if (!m) return;
+                        var ci = +m[1], c = appData.customers[ci]; if (!c || !c.cancelled) return;
+                        var anc = b; while (anc && anc !== document.body && (anc.textContent || '').indexOf('هذا العقد مفسوخ') < 0) anc = anc.parentNode;
+                        if (!anc || anc === document.body || anc.querySelector('#v98-refund')) return;
+                        var ban = [].slice.call(anc.querySelectorAll('div')).filter(function (d) { return (d.textContent || '').indexOf('هذا العقد مفسوخ') >= 0 && !d.querySelector('div'); })[0];
+                        if (ban) ban.insertAdjacentHTML('afterend', panelHtml(ci));
+                    });
+                }
+                window.v98Refund = function (ci) {
+                    var s = stats(ci); if (!s) return;
+                    var pa = appData.paymentAccounts || { wallets: [], banks: [] }, o = document.createElement('div');
+                    o.style.cssText = 'position:fixed;inset:0;z-index:2147483150;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding-top:12px;direction:rtl;';
+                    var inp = 'class="installment-input" style="width:100%;"';
+                    o.innerHTML = '<div style="background:#fff;color:#222;border-radius:14px;width:min(460px,95vw);max-height:90vh;overflow:auto;padding:16px;font-family:inherit;">' +
+                        '<b style="font-size:15px;">💸 رد مبلغ للعميل — ' + esc(s.c.name) + '</b>' +
+                        '<p style="font-size:12px;color:#666;margin:6px 0 10px;">المستحق رده ' + money(s.due) + ' — تم رده ' + money(s.done) + ' — المتبقى ' + money(s.left) + '</p>' +
+                        '<span class="field-label">المبلغ</span><input type="number" id="v98-amt" ' + inp + ' min="1" value="' + s.left + '">' +
+                        '<span class="field-label">التاريخ</span><input type="date" id="v98-date" ' + inp + ' value="' + new Date().toISOString().split('T')[0] + '">' +
+                        '<span class="field-label">💳 طريقة الرد</span><select id="v98-method" ' + inp + '>' + Object.keys(METHODS).map(function (k) { return '<option value="' + k + '">' + METHODS[k] + '</option>'; }).join('') + '</select>' +
+                        '<div id="v98-accwrap" style="display:none;"><span class="field-label">اسم المحفظة/الحساب</span><select id="v98-acc" ' + inp + '></select></div>' +
+                        '<span class="field-label">ملاحظات</span><input type="text" id="v98-note" ' + inp + ' placeholder="اختيارى">' +
+                        '<div style="display:flex;gap:8px;margin-top:12px;"><button id="v98-ok" style="flex:1;padding:10px;background:var(--brand-green,#27ae60);color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;">✅ تسجيل الرد</button>' +
+                        '<button id="v98-no" style="flex:1;padding:10px;background:#999;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;">إلغاء</button></div></div>';
+                    document.body.appendChild(o);
+                    var meth = o.querySelector('#v98-method'), wrap = o.querySelector('#v98-accwrap'), acc = o.querySelector('#v98-acc');
+                    meth.onchange = function () {
+                        var arr = meth.value === 'wallet' ? (pa.wallets || []) : meth.value === 'bank' ? (pa.banks || []) : [];
+                        wrap.style.display = meth.value === 'cash' ? 'none' : 'block';
+                        acc.innerHTML = arr.length ? arr.map(function (a) { return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>'; }).join('') : '<option value="">— لا توجد حسابات —</option>';
+                    };
+                    o.querySelector('#v98-no').onclick = function () { o.remove(); };
+                    o.querySelector('#v98-ok').onclick = async function () {
+                        var amount = parseFloat(o.querySelector('#v98-amt').value), date = o.querySelector('#v98-date').value || new Date().toISOString().split('T')[0], note = o.querySelector('#v98-note').value.trim();
+                        if (!(amount > 0)) return alert('❌ أدخل مبلغًا صحيحًا');
+                        var cur = stats(ci);
+                        if (amount > cur.left + 0.5 && !confirm('⚠️ المبلغ (' + money(amount) + ') أكبر من المتبقى المستحق رده (' + money(cur.left) + ').\nهل تريد المتابعة؟')) return;
+                        var method = meth.value, info = method !== 'cash' ? getPaymentAccountById(acc.value) : null;
+                        if (method !== 'cash' && !info) return alert('❌ يرجى اختيار المحفظة أو الحساب البنكى أولاً (أو أضف حساب جديد من شاشة الحسابات)');
+                        if (!(await verifyAdminPassword('رد مبلغ فسخ عقد'))) return;
+                        var c = cur.c; _ensureId(c, 'customer');
+                        var exp = { _id: 'exp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6), date: date, amount: amount, region: '', building: '',
+                            note: '🚫 فسخ عقد — رد للعميل: ' + c.name + ' (' + c.building + ' / ' + c.unit + ')' + (note ? ' — ' + note : ''), authNumber: '', authNotes: note,
+                            paymentMethod: method, accountId: info ? info.id : null, accountName: info ? info.name : null, expenseCategory: 'cancellation_refund', refundCustomerId: c._id };
+                        appData.expenses.push(exp); markDirty('expense', exp); saveData();
+                        try { logAudit('رد مبلغ فسخ عقد', 'مصروفات', c.name + ' — ' + money(amount) + ' — ' + (METHODS[method] || method) + (info ? ' (' + info.name + ')' : ''), { customer: c.name }); } catch (e) {}
+                        o.remove(); alert('✅ سُجِّل الرد كمصروف من الخزينة (بند فسخ عقد)'); viewCustomerDetail(ci);
+                    };
+                };
+
+                /* مصروف عام للخزينة (غير مرتبط بعمارة) */
+                window.v98ToggleGeneral = function () {
+                    var on = !!(document.getElementById('exGeneral') && document.getElementById('exGeneral').checked);
+                    ['exRegion', 'exBld'].forEach(function (id) { var e = document.getElementById(id); if (e) { e.disabled = on; e.style.opacity = on ? '.45' : ''; } });
+                };
+                var t = null;
+                new MutationObserver(function () { clearTimeout(t); t = setTimeout(inject, 100); }).observe(document.body, { childList: true, subtree: true });
+                console.log('%c💸 v98: رد مبلغ الفسخ كمصروف + مصروف عام للخزينة', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+            /* ══════════════════════════════════════════════════════════════════
+               📊 v99 — خزينة المستثمرين = ناتج استثماراتهم الفعلية + نوع الاستثمار + قاعدة الحركة الجديدة
+               • الرصيد الفعلى لكل مستثمر = Σ (المستحق − المصروف) من calculateInvestmentDue لكل استثمار بطريقة حسابه (نوع 1..10)،
+                 لا من الإيداعات/السحوبات اليدوية — فلا يظهر سالبًا لمالك لا يودع (نوع 7/9/10) ما دام لم يُصرف له أكثر من حقه.
+               • نوع الاستثمار والنطاق يظهران لكل مستثمر فى كشف الحسابات وخزينة المستثمرين.
+               • قاعدة الحركة الجديدة: عند اختيار مستثمر يظهر المستحق/المصروف/المتاح، والصرف الزائد عن المتاح يتطلب تأكيدًا صريحًا،
+                 والإيداع لأنواع (7/9/10) يتطلب تأكيدًا. لا شىء يتغير فى بيانات الخزينة المخزّنة.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v99InvestorActual() {
+                var TL = { 1: 'استرجاع + أرباح', 2: 'مئوية من المحصل', 3: 'سهم من الأرباح', 4: 'قسط شهري', 5: 'أرباح نهائية', 6: 'متدرج حسب السنة',
+                           7: 'نظام تطوير وتسويق لحساب المالك', 8: 'استثمار الأولى لحساب المالك', 9: 'استثمار إداري', 10: 'استثمار إداري وإشراف بناء' };
+                function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+                function n0(v) { return Math.round(+v || 0).toLocaleString(); }
+                function prof(id) { return (appData.investorProfiles || []).filter(function (p) { return p._id === id; })[0]; }
+                function rows() {
+                    return (appData.investorInvestments || []).map(function (inv) {
+                        var p = prof(inv.investorId), c = { due: 0, paid: 0, pending: 0, overpaid: 0 };
+                        try { c = calculateInvestmentDue(inv, getProjectData(inv.projectId, inv.buildingId)) || c; } catch (e) {}
+                        var t = parseInt(inv.investmentType || 1, 10), sc = ''; try { sc = _lcScopeLabel(inv); } catch (e) { sc = String(inv.buildingId || inv.projectId || ''); }
+                        return { inv: inv, name: p ? p.name : '', pid: inv.investorId, type: t, tl: TL[t] || ('نوع ' + t), scope: sc, due: c.due || 0, paid: c.paid || 0 };
+                    });
+                }
+                function of(who) { return rows().filter(function (r) { return r.name === who || r.pid === who; }); }
+                function sum(a, k) { return a.reduce(function (s, r) { return s + (+r[k] || 0); }, 0); }
+                function net(a) { return Math.round(sum(a, 'due') - sum(a, 'paid')); }
+                function typesOf(a) { var o = {}; a.forEach(function (r) { o[r.tl] = 1; }); return Object.keys(o); }
+
+                /* لوحة الرصيد الفعلى + تصحيح بطاقة الرصيد */
+                function patchTreasury() {
+                    var root = document.getElementById('treasuryTabContainer'); if (!root || !root.querySelector('#invTreasuryNetBalance')) return;
+                    var all = rows(); if (!all.length) return;
+                    var n = net(all), col = n >= 0 ? '#4caf50' : '#f44336';
+                    [].slice.call(root.querySelectorAll('.dashboard-card')).forEach(function (card) {
+                        var lb = card.querySelector('.label'), vl = card.querySelector('.value');
+                        if (lb && vl && lb.textContent.indexOf('الرصيد الحالي') >= 0) { vl.textContent = n.toLocaleString(); vl.style.color = col; lb.textContent = 'الرصيد الفعلى (المستحق − المصروف) 💰'; }
+                    });
+                    var nb = root.querySelector('#invTreasuryNetBalance'); if (nb) nb.innerHTML = '💰 الرصيد الفعلى للمستثمرين (من استثماراتهم الفعلية): ' + n.toLocaleString();
+                    if (root.querySelector('#v99-actual')) return;
+                    var anchor = root.querySelector('#invTreasuryDepositTable'); anchor = anchor && anchor.parentNode; if (!anchor) return;
+                    var h = '<div id="v99-actual" class="installment-card" style="border:2px solid #9c27b0;margin-bottom:15px;"><h4 style="color:#9c27b0;margin-top:0;">📊 الرصيد الفعلى حسب الاستثمارات</h4>' +
+                        '<div style="font-size:12px;color:#666;margin-bottom:8px;">محسوب من طريقة حساب كل استثمار (نوعه ونسبه)، وليس من الإيداعات/السحوبات اليدوية.</div>' +
+                        '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;text-align:center;"><thead><tr style="background:#9c27b0;color:#fff;">' +
+                        ['المستثمر', 'نوع الاستثمار', 'النطاق', 'المستحق', 'المصروف', 'المتبقى / زيادة'].map(function (x) { return '<th style="padding:8px;">' + x + '</th>'; }).join('') + '</tr></thead><tbody>' +
+                        all.map(function (r) {
+                            var rem = Math.round(r.due - r.paid);
+                            return '<tr style="border-bottom:1px solid #eee;"><td style="padding:7px;font-weight:bold;">' + esc(r.name || '—') + '</td><td>' + esc(r.tl) + '</td><td>' + esc(r.scope) + '</td><td>' + n0(r.due) + '</td><td>' + n0(r.paid) +
+                                '</td><td style="font-weight:bold;color:' + (rem >= 0 ? '#2e7d32' : '#c62828') + ';">' + (rem >= 0 ? n0(rem) : 'زيادة مصروف ' + n0(-rem)) + '</td></tr>';
+                        }).join('') + '<tr style="background:#f3e5f5;font-weight:bold;"><td colspan="3" style="padding:8px;">الإجمالى</td><td>' + n0(sum(all, 'due')) + '</td><td>' + n0(sum(all, 'paid')) + '</td><td>' + n0(n) + '</td></tr></tbody></table></div></div>';
+                    anchor.insertAdjacentHTML('beforebegin', h);
+                }
+                var _fit = filterInvestorTreasury;
+                filterInvestorTreasury = function () { var r = _fit.apply(this, arguments); try { patchTreasury(); } catch (e) { console.warn('v99:', e); } return r; };
+                var _rit = renderInvestorsTreasuryTab;
+                renderInvestorsTreasuryTab = function () { var r = _rit.apply(this, arguments); try { patchTreasury(); } catch (e) {} return r; };
+
+                /* كشف حسابات المستثمرين: نوع الاستثمار + الرصيد الفعلى */
+                var _sid = showInvestorDetailedView;
+                showInvestorDetailedView = function () {
+                    var r = _sid.apply(this, arguments);
+                    try {
+                        [].slice.call(document.querySelectorAll('#treasuryTabContainer .installment-card')).forEach(function (card) {
+                            var h4 = card.querySelector('h4'); if (!h4) return;
+                            var who = h4.textContent.replace('👤', '').trim(), a = of(who); if (!a.length) return;
+                            var n = net(a);
+                            h4.insertAdjacentHTML('afterend', '<div style="font-size:12px;color:#6a1b9a;margin:-4px 0 10px;"><b>نوع الاستثمار:</b> ' + typesOf(a).map(esc).join(' ، ') + ' — <b>المستحق:</b> ' + n0(sum(a, 'due')) + ' — <b>المصروف:</b> ' + n0(sum(a, 'paid')) + '</div>');
+                            [].slice.call(card.querySelectorAll('div')).forEach(function (d) {
+                                if ((d.textContent || '').trim().indexOf('💰 الرصيد الحالي') === 0 && !d.querySelector('div')) {
+                                    d.textContent = '💰 الرصيد الفعلى: ' + n.toLocaleString(); d.style.background = n >= 0 ? '#c8e6c9' : '#ffcdd2'; d.style.color = n >= 0 ? '#2e7d32' : '#c62828';
+                                }
+                            });
+                        });
+                    } catch (e) { console.warn('v99 detail:', e); }
+                    return r;
+                };
+
+                /* قاعدة إنشاء حركة مستثمر جديدة */
+                function who() { var a = document.getElementById('invTxInvestorId'), b = document.getElementById('invTxInvestor'); return (a && a.value) || (b && b.value) || ''; }
+                function scoped() { var all = who() ? of(who()) : [], bld = (document.getElementById('invTxBuilding') || {}).value; var s = bld ? all.filter(function (r) { return r.inv.buildingId === bld; }) : all; return s.length ? s : all; }
+                function hint() {
+                    var sel = document.getElementById('invTxInvestorId'); if (!sel) return;
+                    var h = document.getElementById('v99-hint');
+                    if (!h) { h = document.createElement('div'); h.id = 'v99-hint'; h.style.cssText = 'grid-column:1/-1;font-size:12px;background:#f3e5f5;border-radius:8px;padding:8px 10px;color:#4a148c;display:none;'; sel.parentNode.parentNode.insertBefore(h, sel.parentNode.nextSibling); }
+                    var a = scoped(); if (!a.length) { h.style.display = 'none'; return; }
+                    h.style.display = 'block';
+                    h.innerHTML = a.map(function (r) { return '• <b>' + esc(r.tl) + '</b> (' + esc(r.scope) + ') — المستحق ' + n0(r.due) + ' | المصروف ' + n0(r.paid) + ' | المتاح للصرف <b>' + n0(Math.max(0, r.due - r.paid)) + '</b>'; }).join('<br>');
+                }
+                var _op = openAddInvestorTransactionForm;
+                openAddInvestorTransactionForm = function () { var r = _op.apply(this, arguments); try { hint(); } catch (e) {} return r; };
+                document.addEventListener('change', function (e) { if (e.target && (e.target.id === 'invTxInvestorId' || e.target.id === 'invTxBuilding' || e.target.id === 'invTxInvestor')) { try { hint(); } catch (x) {} } });
+                var _add = addInvestorTreasuryTransaction;
+                addInvestorTreasuryTransaction = async function () {
+                    try {
+                        var type = (document.getElementById('invTxType') || {}).value, amt = parseFloat((document.getElementById('invTxAmount') || {}).value), sc = scoped();
+                        if (sc.length && amt > 0) {
+                            if (type === 'withdraw') {
+                                var avail = Math.max(0, net(sc));
+                                if (amt > avail + 0.5 && !confirm('⛔ قاعدة الصرف: المبلغ (' + amt.toLocaleString() + ') أكبر من المتاح فعليًا لهذا المستثمر (' + avail.toLocaleString() + ').\nالمستحق ' + n0(sum(sc, 'due')) + ' − المصروف ' + n0(sum(sc, 'paid')) + '.\nهل تريد المتابعة رغم ذلك؟')) return;
+                            } else if (type === 'deposit' && sc.every(function (r) { return [7, 9, 10].indexOf(r.type) >= 0; })) {
+                                if (!confirm('ℹ️ هذا النوع (' + typesOf(sc).join(' / ') + ') لا يودع فيه المستثمر نقودًا؛ مستحقاته تُحسب من تحصيلات مشروعه.\nهل تريد تسجيل الإيداع رغم ذلك؟')) return;
+                            }
+                        }
+                    } catch (e) { console.warn('v99 rule:', e); }
+                    return _add.apply(this, arguments);
+                };
+                window._v99dbg = { rows: rows, net: net, of: of };
+                console.log('%c📊 v99: رصيد المستثمرين الفعلى + نوع الاستثمار + قاعدة الحركة', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+            /* ══════════════════════════════════════════════════════════════════
+               🔒 v100 — سحابة فقط: لا تحميل من الكاش نهائيًا، ولا تأثير لبيانات الكاش على السحابة
+               المفتاح الرئيسى AL_OULA_CLOUD_ONLY (true). يعطّل:
+                 ① القراءة من كاش IndexedDB (loadAppDataFromCache) ② الرجوع لـ localStorage عند فشل السحابة
+                 ③ دمج ملف/كاش القرص (v10) ورفع معلّقاته ④ إعادة حقن الطابور المعلّق ⑤ استرجاع السجلات من الكاش (v96)
+               الكتابة المحلية تبقى للنسخ الاحتياطى فقط ولا تُقرأ أبدًا. لإرجاع السلوك القديم: غيّر القيمة إلى false.
+               ══════════════════════════════════════════════════════════════════ */
+            var AL_OULA_CLOUD_ONLY = true;
+            (function v100CloudOnly() {
+                var _lac = loadAppDataFromCache;
+                loadAppDataFromCache = async function () { return AL_OULA_CLOUD_ONLY ? null : _lac.apply(this, arguments); };
+                var _ms = v10MergeSnapshot;
+                v10MergeSnapshot = function () { return AL_OULA_CLOUD_ONLY ? undefined : _ms.apply(this, arguments); };
+                var _pm = v10PullAndMerge;
+                v10PullAndMerge = async function () { return AL_OULA_CLOUD_ONLY ? null : _pm.apply(this, arguments); };
+                window.v10PullAndMerge = v10PullAndMerge;
+                var _fp = v10FlushPending;
+                v10FlushPending = async function () { return AL_OULA_CLOUD_ONLY ? undefined : _fp.apply(this, arguments); };
+                if (typeof v10ReadDisk === 'function') {
+                    var _rd = v10ReadDisk;
+                    v10ReadDisk = async function () { return AL_OULA_CLOUD_ONLY ? null : _rd.apply(this, arguments); };
+                }
+                console.log('%c🔒 v100: سحابة فقط — لا تحميل من الكاش ولا تأثير له على السحابة', 'color:#1565c0;font-weight:bold;font-size:13px');
             })();
 
         </script>
