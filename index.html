@@ -25210,7 +25210,7 @@ div[style*="position:fixed"][style*="bottom:14px"],div[style*="position: fixed"]
 
                 // لا نرفع للسحابة — فقط نعرض ما فيها
                 showCloudSyncIndicator('success', '✅ البيانات محدّثة');
-                renderDashboard();
+                if (appData.currentView === 'dashboard') renderDashboard();   // v103: لا نطرد المستخدم من الشاشة المفتوحة عند تحديث من جهاز آخر
             }
 
             function showCloudSyncIndicator(status, message) {
@@ -45531,6 +45531,19 @@ async function processInstallments(editIndex) {
                         '</div><table style="font-size:12px;width:100%;border-collapse:collapse;">' + rows + '</table></div>';
                 }
 
+                /* v103: معرّف الطلب = بصمة محتواه (الموظف + العناصر، بدون updatedAt) — نفس التعديل لا يُنشئ طلباً جديداً عند إعادة الإرسال */
+                function fpId(items, by) {
+                    var norm = function (k, v) {
+                        if (k === 'updatedAt') return undefined;
+                        if (v && typeof v === 'object' && !Array.isArray(v)) { var o = {}; Object.keys(v).sort().forEach(function (x) { o[x] = v[x]; }); return o; }
+                        return v;
+                    };
+                    var list = items.map(function (it) { return [it.type, it.id, !!it.deleted, it.deleted ? null : it.data]; })
+                        .sort(function (a, b) { var x = a[0] + '|' + a[1], y = b[0] + '|' + b[1]; return x < y ? -1 : x > y ? 1 : 0; });
+                    var s = JSON.stringify([by, list], norm), h1 = 0x811c9dc5, h2 = 0x01000193;
+                    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c, 2246822519) ^ (h2 >>> 13); }
+                    return 'r' + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + s.length.toString(36);
+                }
                 /* ── إرسال الطلب (الموظف) ── */
                 async function sendRequest() {
                     if (!Object.keys(_deltaQueue).length || sending) return;
@@ -45540,7 +45553,7 @@ async function processInstallments(editIndex) {
                         if (!items.length) { _deltaQueue = {}; return; }   // لا تغيير فعلى = لا طلب
                         items.forEach(function (it) { var c = catOf(it); if (pm && pm[c] === false && denied.indexOf(c) < 0) denied.push(c); });
                         if (denied.length) { restoreBase(); alert('⛔ غير مسموح لحسابك: ' + denied.map(function (c) { return CATS[c]; }).join('، ') + ' — تواصل مع المدير.'); return; }
-                        var pkg = { id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), by: me(), at: new Date().toISOString(), label: labelOf(items), n: items.length, items: items,
+                        var pkg = { id: fpId(items, me()), by: me(), at: new Date().toISOString(), label: labelOf(items), n: items.length, items: items,
                             lines: items.map(function (it) { return ACT[it.act] + ' ' + (TYPE_AR[it.type] || it.type) + (it.name ? ' (' + it.name + ')' : ''); }) };
                         var r = await fetch(API_BASE_URL + '/rest/v1/' + API_TABLE, { method: 'POST', headers: hdrs({ 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' }), body: JSON.stringify({ key: REQ + pkg.id, value: JSON.stringify(pkg) }) });
                         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -46838,6 +46851,57 @@ async function processInstallments(editIndex) {
                 };
 
                 console.log('%c🖥️ v101: المتصلون الآن + شاشة الطلبات الكاملة + أرشيف سجل الأحداث + طباعة', 'color:#1565c0;font-weight:bold;font-size:13px');
+            })();
+
+            /* ══════════════════════════════════════════════════════════════════
+               🧷 v104 — حارس نموذج تعديل العقد (إضافة فقط — لا يعدّل أى دالة أصلية)
+               ─────────────────────────────────────────────────────────────────
+               المشكلة: نموذج التعديل يحفظ بـ "رقم موضع العميل" فى القائمة. لو نزل تحديث من جهاز آخر وغيّر ترتيب القائمة
+               أثناء فتح النموذج، يُكتب التعديل فوق عميل آخر بصمت.
+               الحل: أثناء فتح نموذج تعديل (زر الحفظ فيه رقم موضع) يُؤجَّل تطبيق تحديث السحابة. بعد إغلاق النموذج
+               وانتهاء أى حفظ جارٍ يُجلب أحدث ما فى السحابة (لا نطبّق النسخة المؤجَّلة القديمة) ويُطبَّق بنفس دالة handleConflict الأصلية.
+               نموذج "عقد جديد" لا يتأثر. للإيقاف: window.__V104__ = { enabled:false } قبل هذا الكود.
+               ══════════════════════════════════════════════════════════════════ */
+            (function v104EditFormGuard() {
+                var CFG = window.__V104__ = Object.assign({ enabled: true }, window.__V104__ || {});
+                if (typeof handleConflict !== 'function' || typeof loadFromCloud !== 'function') return;
+                var _hc104 = handleConflict, held = false, busy = false, lastTry = 0;
+
+                function editFormOpen() {
+                    try {
+                        var b = document.querySelector('button[onclick^="processInstallments("]');
+                        return !!(b && /^processInstallments\(\s*\d+\s*\)/.test(b.getAttribute('onclick') || '') && document.getElementById('custName'));
+                    } catch (e) { return false; }
+                }
+
+                handleConflict = async function (cloudData) {
+                    if (CFG.enabled && editFormOpen()) {
+                        held = true;
+                        console.warn('🧷 v104: تحديث السحابة مؤجَّل — نموذج تعديل عقد مفتوح (يُطبَّق بعد إغلاقه)');
+                        return;
+                    }
+                    return _hc104.apply(this, arguments);
+                };
+
+                async function releaseHeld() {
+                    if (!held || busy || !CFG.enabled) return;
+                    if (editFormOpen() || cloudSyncInProgress || Object.keys(_deltaQueue).length > 0) return;   // انتظر انتهاء الحفظ
+                    if (Date.now() - lastTry < 15000 && lastTry) return;
+                    busy = true; lastTry = Date.now();
+                    try {
+                        var cd = await loadFromCloud();                          // أحدث نسخة (لا النسخة المؤجَّلة القديمة)
+                        if (!cd || !cd.lastUpdate) return;                       // فشل التحميل: يبقى held ونعيد المحاولة
+                        if (editFormOpen() || cloudSyncInProgress || Object.keys(_deltaQueue).length > 0) return;   // فُتح نموذج/بدأ حفظ أثناء التحميل
+                        await _hc104(cd);
+                        localLastModified = cd.lastUpdate;
+                        held = false; lastTry = 0;
+                        console.log('🧷 v104: طُبِّق تحديث السحابة المؤجَّل بعد إغلاق النموذج');
+                    } catch (e) { console.warn('v104 release:', e); }
+                    finally { busy = false; }
+                }
+                setInterval(releaseHeld, 1500);
+
+                console.log('%c🧷 v104: حارس نموذج تعديل العقد — تأجيل تحديث السحابة أثناء فتح نموذج التعديل', 'color:#1565c0;font-weight:bold;font-size:13px');
             })();
         </script>
 
