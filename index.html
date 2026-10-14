@@ -38571,6 +38571,8 @@ async function processInstallments(editIndex) {
 
             /* ✅ إضافة: عرض تفاصيل الاستلامات (المحصل) حسب طريقة التحصيل — نقدى / محفظة / بنك — مع إمكانية التصفية لحساب واحد بعينه */
             function showTreasuryMethodCollections(method, accountId) {
+                return showTreasuryFullScreen(method, accountId); // شاشة كاملة بدل النافذة المنبثقة
+
                 var rows = (appData.collections || []).filter(function(col) {
                     if (col.type !== 'payment') return false;
                     var m = col.paymentMethod || 'cash';
@@ -38609,6 +38611,174 @@ async function processInstallments(editIndex) {
                     '</div></div>';
                 document.body.appendChild(overlay);
                 overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+            }
+
+            /* ══════════════ إضافة: شاشة كاملة لحركة الخزينة (وارد / صادر) مع فلاتر وتصدير Excel ══════════════
+               تحل محل نافذة "استلامات المحافظ" المنبثقة. المصادر (نفس منطق getAccountNetTotal):
+               وارد  = تحصيلات (payment) + إيداعات مستثمرين + تحويل داخلي وارد (مصروف بقيمة سالبة)
+               صادر  = مصروفات + سحوبات مستثمرين + تحويل داخلي صادر */
+            var _trsInit = { method: '', accountId: '' };
+
+            function _trsEsc(s) {
+                return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+
+            function _trsAllMovements() {
+                var out = [];
+                function acc(id) { return id ? getPaymentAccountById(id) : null; }
+                (appData.collections || []).forEach(function(c) {
+                    if (c.type !== 'payment') return;
+                    var a = acc(c.accountId);
+                    out.push({ date: c.date || '', dir: 'in', kind: 'تحصيل', party: c.customerName || '', region: c.region || '', building: c.building || '', unit: c.unit || '',
+                        method: c.paymentMethod || 'cash', accountId: c.accountId || '', accountName: c.accountName || (a ? a.name : ''), provider: a ? (a.provider || '') : '',
+                        ref: c.receiptNumber || '', note: c.receiptNotes || '', amount: Math.abs(Number(c.amount) || 0) });
+                });
+                (appData.expenses || []).forEach(function(e) {
+                    var a = acc(e.accountId), amt = Number(e.amount) || 0;
+                    var isIn = amt < 0; // قيد التحويل الداخلي الوارد يُسجَّل بقيمة سالبة
+                    out.push({ date: e.date || '', dir: isIn ? 'in' : 'out', kind: e.isInternalTransfer ? (isIn ? 'تحويل داخلي وارد' : 'تحويل داخلي صادر') : 'مصروف', party: '',
+                        region: e.region || '', building: e.building || '', unit: '', method: e.paymentMethod || 'cash', accountId: e.accountId || '',
+                        accountName: e.accountName || (a ? a.name : ''), provider: a ? (a.provider || '') : '', ref: e.authNumber || '', note: e.note || '', amount: Math.abs(amt) });
+                });
+                (appData.investorTreasury || []).forEach(function(t) {
+                    if (t.type !== 'deposit' && t.type !== 'withdraw') return;
+                    var a = acc(t.accountId);
+                    out.push({ date: t.date || '', dir: t.type === 'deposit' ? 'in' : 'out', kind: t.type === 'deposit' ? 'إيداع مستثمر' : 'سحب مستثمر', party: t.investorName || '',
+                        region: t.region || '', building: t.building || '', unit: '', method: t.paymentMethod || 'cash', accountId: t.accountId || '',
+                        accountName: t.accountName || (a ? a.name : ''), provider: a ? (a.provider || '') : '', ref: t.referenceNumber || '', note: t.note || '', amount: Math.abs(Number(t.amount) || 0) });
+                });
+                return out.sort(function(x, y) { return (y.date || '').localeCompare(x.date || ''); });
+            }
+
+            function _trsFiltered() {
+                var g = function(id) { var el = document.getElementById(id); return el ? el.value : ''; };
+                var method = g('trsMethod'), provider = g('trsProvider'), accountId = g('trsAccount'), dir = g('trsDir'), from = g('trsFrom'), to = g('trsTo');
+                return _trsAllMovements().filter(function(m) {
+                    if (method && m.method !== method) return false;
+                    if (provider && m.provider !== provider) return false;
+                    if (accountId && m.accountId !== accountId) return false;
+                    if (dir && m.dir !== dir) return false;
+                    if (from && (!m.date || m.date < from)) return false;
+                    if (to && (!m.date || m.date > to)) return false;
+                    return true;
+                });
+            }
+
+            function _trsMethodLabel(m) { return m === 'cash' ? 'نقدى' : (m === 'wallet' ? 'محفظة إلكترونية' : 'حساب بنكى'); }
+
+            function _trsFillAccounts() {
+                var sel = document.getElementById('trsAccount'); if (!sel) return;
+                var method = document.getElementById('trsMethod').value, provider = document.getElementById('trsProvider').value, keep = sel.value;
+                var pa = appData.paymentAccounts || { wallets: [], banks: [] }, list = [];
+                if (!method || method === 'wallet') (pa.wallets || []).forEach(function(a) { if (!provider || a.provider === provider) list.push(a); });
+                if ((!method || method === 'bank') && !provider) (pa.banks || []).forEach(function(a) { list.push(a); });
+                sel.innerHTML = '<option value="">كل الحسابات</option>' + list.map(function(a) { return '<option value="' + _trsEsc(a.id) + '">' + _trsEsc(a.name) + '</option>'; }).join('');
+                sel.value = list.some(function(a) { return a.id === keep; }) ? keep : '';
+            }
+
+            function trsRefresh(fromMethodChange) {
+                if (fromMethodChange) _trsFillAccounts();
+                var rows = _trsFiltered(), tin = 0, tout = 0;
+                rows.forEach(function(m) { if (m.dir === 'in') tin += m.amount; else tout += m.amount; });
+                var body = rows.map(function(m, i) {
+                    var isIn = m.dir === 'in';
+                    return '<tr style="background:' + (isIn ? '#f1f8f1' : '#fff3f3') + ';"><td>' + (i + 1) + '</td><td>' + _trsEsc(m.date || '-') + '</td>' +
+                        '<td style="font-weight:bold;color:' + (isIn ? '#27ae60' : '#c0392b') + ';">' + (isIn ? 'وارد' : 'صادر') + '</td><td>' + _trsEsc(m.kind) + '</td><td>' + _trsEsc(m.party || '-') + '</td>' +
+                        '<td>' + _trsEsc(m.region || '-') + '</td><td>' + _trsEsc(m.building || '-') + '</td><td>' + _trsEsc(m.unit || '-') + '</td>' +
+                        '<td>' + _trsMethodLabel(m.method) + '</td><td>' + _trsEsc(m.accountName || '-') + '</td><td>' + _trsEsc(m.ref || '-') + '</td>' +
+                        '<td style="font-weight:bold;color:#27ae60;">' + (isIn ? m.amount.toLocaleString() : '') + '</td><td style="font-weight:bold;color:#c0392b;">' + (!isIn ? m.amount.toLocaleString() : '') + '</td></tr>';
+                }).join('') || '<tr><td colspan="13" style="text-align:center;color:#999;padding:20px;">لا توجد حركات بهذه الفلاتر</td></tr>';
+                document.getElementById('trsBody').innerHTML = body;
+                document.getElementById('trsSummary').innerHTML =
+                    '<div style="flex:1;min-width:150px;background:#c8e6c9;border-radius:8px;padding:12px;font-weight:bold;">⬇️ إجمالي الوارد: ' + tin.toLocaleString() + ' جنيه</div>' +
+                    '<div style="flex:1;min-width:150px;background:#ffcdd2;border-radius:8px;padding:12px;font-weight:bold;">⬆️ إجمالي الصادر: ' + tout.toLocaleString() + ' جنيه</div>' +
+                    '<div style="flex:1;min-width:150px;background:#bbdefb;border-radius:8px;padding:12px;font-weight:bold;">💰 الصافي: ' + (tin - tout).toLocaleString() + ' جنيه &nbsp;(' + rows.length + ' حركة)</div>';
+            }
+
+            function trsReset() {
+                ['trsMethod', 'trsProvider', 'trsAccount', 'trsDir', 'trsFrom', 'trsTo'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+                trsRefresh(true);
+            }
+
+            function showTreasuryFullScreen(method, accountId) {
+                _trsInit = { method: method || '', accountId: accountId || '' };
+                appData.currentView = 'treasuryMovements';
+                document.getElementById('current-command-text').innerText = '💰 حركة الخزينة (وارد / صادر)';
+                var provOpts = '<option value="">كل الأنواع</option>' + WALLET_PROVIDERS_LIST.map(function(p) { return '<option value="' + p.v + '">' + p.l + '</option>'; }).join('');
+                var html = '<div class="installment-card" style="background:#f3e5f5;border:2px solid #9c27b0;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><h3 style="color:#9c27b0;margin:0;"><i class="fas fa-filter"></i>&nbsp;&nbsp;🔍 فلترة حركة الخزينة</h3>' +
+                    '<button onclick="renderTreasury()" style="padding:8px 16px;background:#666;color:white;border:none;border-radius:8px;cursor:pointer;">↩ رجوع للخزينة</button></div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px;">' +
+                    '<div><span class="field-label">طريقة الدفع</span><select id="trsMethod" class="installment-input" onchange="trsRefresh(true)"><option value="">الكل</option><option value="cash">نقدى</option><option value="wallet">محفظة إلكترونية</option><option value="bank">حساب بنكى</option></select></div>' +
+                    '<div><span class="field-label">نوع المحفظة</span><select id="trsProvider" class="installment-input" onchange="trsRefresh(true)">' + provOpts + '</select></div>' +
+                    '<div><span class="field-label">الحساب / المحفظة</span><select id="trsAccount" class="installment-input" onchange="trsRefresh()"><option value="">كل الحسابات</option></select></div>' +
+                    '<div><span class="field-label">الاتجاه</span><select id="trsDir" class="installment-input" onchange="trsRefresh()"><option value="">وارد وصادر</option><option value="in">وارد فقط</option><option value="out">صادر فقط</option></select></div>' +
+                    '<div><span class="field-label">من تاريخ</span><input type="date" id="trsFrom" class="installment-input" onchange="trsRefresh()"></div>' +
+                    '<div><span class="field-label">إلى تاريخ</span><input type="date" id="trsTo" class="installment-input" onchange="trsRefresh()"></div>' +
+                    '</div><div style="display:flex;gap:8px;">' +
+                    '<button onclick="trsReset()" style="flex:1;padding:10px;background:#666;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;"><i class="fas fa-undo"></i> إعادة</button>' +
+                    '<button onclick="exportTreasuryMovementsExcel()" style="flex:1;padding:10px;background:#27ae60;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;"><i class="fas fa-file-excel"></i> تصدير Excel</button></div></div>' +
+                    '<div id="trsSummary" style="display:flex;flex-wrap:wrap;gap:10px;margin:12px 0;"></div>' +
+                    '<div class="table-scroll-wrap"><table class="res-table"><thead><tr><th>م</th><th>التاريخ</th><th>الاتجاه</th><th>النوع</th><th>العميل / المستثمر</th><th>المنطقة</th><th>العمارة</th><th>الوحدة</th><th>الطريقة</th><th>الحساب</th><th>المرجع</th><th>وارد</th><th>صادر</th></tr></thead><tbody id="trsBody"></tbody></table></div>';
+                setMainContent(html);
+                document.getElementById('trsMethod').value = _trsInit.method;
+                _trsFillAccounts();
+                document.getElementById('trsAccount').value = _trsInit.accountId;
+                trsRefresh();
+            }
+
+            function exportTreasuryMovementsExcel() {
+                var rows = _trsFiltered();
+                if (!rows.length) return alert('لا توجد حركات للتصدير بهذه الفلاتر');
+                var g = function(id) { var el = document.getElementById(id); return el ? el.value : ''; };
+                var tin = 0, tout = 0, perAcc = {};
+                var data = rows.map(function(m, i) {
+                    var isIn = m.dir === 'in';
+                    if (isIn) tin += m.amount; else tout += m.amount;
+                    var key = m.method === 'cash' ? 'نقدى' : (m.accountName || _trsMethodLabel(m.method));
+                    if (!perAcc[key]) perAcc[key] = { acc: key, method: _trsMethodLabel(m.method), inn: 0, out: 0 };
+                    if (isIn) perAcc[key].inn += m.amount; else perAcc[key].out += m.amount;
+                    return { num: i + 1, date: m.date, dir: isIn ? 'وارد' : 'صادر', kind: m.kind, party: m.party, region: m.region, building: m.building, unit: m.unit,
+                        method: _trsMethodLabel(m.method), account: m.accountName, ref: m.ref, inn: isIn ? m.amount : '', out: isIn ? '' : m.amount,
+                        _bg: isIn ? 'FFE8F5E9' : 'FFFFE8E8', _color: isIn ? 'FF1B5E20' : 'FFC0392B' };
+                });
+                var sumRows = Object.keys(perAcc).map(function(k, i) { var a = perAcc[k]; return { num: i + 1, acc: a.acc, method: a.method, inn: a.inn, out: a.out, net: a.inn - a.out }; });
+                var sub = [];
+                if (g('trsMethod')) sub.push(_trsMethodLabel(g('trsMethod')));
+                if (g('trsProvider')) { var pv = WALLET_PROVIDERS_LIST.filter(function(p) { return p.v === g('trsProvider'); })[0]; if (pv) sub.push(pv.l); }
+                if (g('trsAccount')) { var ai = getPaymentAccountById(g('trsAccount')); if (ai) sub.push(ai.name); }
+                if (g('trsDir')) sub.push(g('trsDir') === 'in' ? 'وارد فقط' : 'صادر فقط');
+                if (g('trsFrom')) sub.push('من ' + g('trsFrom'));
+                if (g('trsTo')) sub.push('إلى ' + g('trsTo'));
+                var today = new Date().toISOString().split('T')[0];
+                buildProfessionalExcel({
+                    title: 'حركة الخزينة (وارد / صادر)',
+                    subtitle: sub.join(' | '),
+                    sheets: [{
+                        name: 'حركة الخزينة',
+                        columns: [
+                            { header: 'م', key: 'num', width: 5 }, { header: 'التاريخ', key: 'date', width: 14 }, { header: 'الاتجاه', key: 'dir', width: 10 },
+                            { header: 'النوع', key: 'kind', width: 18 }, { header: 'العميل / المستثمر', key: 'party', width: 24, align: 'right' },
+                            { header: 'المنطقة', key: 'region', width: 16 }, { header: 'العمارة', key: 'building', width: 14 }, { header: 'الوحدة', key: 'unit', width: 10 },
+                            { header: 'الطريقة', key: 'method', width: 16 }, { header: 'الحساب', key: 'account', width: 22 }, { header: 'المرجع', key: 'ref', width: 16 },
+                            { header: 'وارد', key: 'inn', width: 16, numFmt: '#,##0' }, { header: 'صادر', key: 'out', width: 16, numFmt: '#,##0' }
+                        ],
+                        rows: data,
+                        totals: { num: 'الإجمالى', date: '', dir: '', kind: rows.length + ' حركة', party: '', region: '', building: '', unit: '', method: '', account: 'الصافى: ' + (tin - tout).toLocaleString(), ref: '', inn: tin, out: tout }
+                    }, {
+                        name: 'ملخص الحسابات',
+                        columns: [
+                            { header: 'م', key: 'num', width: 5 }, { header: 'الحساب', key: 'acc', width: 26, align: 'right' }, { header: 'الطريقة', key: 'method', width: 18 },
+                            { header: 'إجمالي الوارد', key: 'inn', width: 18, numFmt: '#,##0' }, { header: 'إجمالي الصادر', key: 'out', width: 18, numFmt: '#,##0' }, { header: 'الصافى', key: 'net', width: 18, numFmt: '#,##0' }
+                        ],
+                        rows: sumRows,
+                        totals: { num: 'الإجمالى', acc: '', method: '', inn: tin, out: tout, net: tin - tout }
+                    }]
+                }).then(function(wb) {
+                    wb.xlsx.writeBuffer().then(function(buf) {
+                        saveAs(new Blob([buf]), 'حركة_الخزينة_' + (sub.join('_') || 'الكل') + '_' + today + '.xlsx');
+                    });
+                });
             }
 
             /* ══════════════ طباعة إيصال تحصيل — به كل البيانات ══════════════ */
@@ -46905,6 +47075,326 @@ async function processInstallments(editIndex) {
             })();
         </script>
 
+<script id="aloula-security-v105">
+/* ══════════════════════════════════════════════════════════════════
+   🔐 v105 — طبقة الأمان (إضافة فقط — لا تعدّل ولا تحذف أى دالة أصلية؛ كلها تغليف فوق الموجود)
+   ① تشفير كلمات سر الدخول (PBKDF2-SHA256 + ملح عشوائى) — يُرحَّل القديم تلقائيًا عند أول دخول مدير
+   ② قفل الدخول مؤقتًا بعد 5 محاولات فاشلة لكل مستخدم
+   ③ تنقية البيانات من أكواد الحقن (HTML/JS) + إزالة الخصائص التنفيذية الغريبة من العناصر المضافة للصفحة
+   ④ فحص الملفات المرفوعة (النوع الحقيقى بالبصمة + الحجم) قبل قراءتها
+   تنبيه: هذه حماية من جهة المتصفح؛ الحماية الكاملة تتطلب تحققًا من جهة الخادم.
+   للإيقاف الطارئ لأى جزء: window.__V105__ = { hash:false, lock:false, scrub:false, upload:false } قبل هذا السكربت.
+   ══════════════════════════════════════════════════════════════════ */
+(function aloulaSecurityV105() {
+    'use strict';
+    var CFG = window.__V105__ = Object.assign({ hash: true, lock: true, scrub: true, upload: true }, window.__V105__ || {});
+    var ALGO = 'pbkdf2-sha256', ITER = 100000, DEFAULTS = ['123', '456'];
+
+    /* ───────── SHA-256 / HMAC / PBKDF2 بالجافاسكربت (احتياطى لو crypto.subtle غير متاح — ناتجهما متطابق) ───────── */
+    var K256 = new Int32Array([
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+    var W256 = new Int32Array(64), INIT256 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    function block(H, m) {   // معالجة كتلة واحدة (16 كلمة) وتحديث الحالة H
+        var w = W256, i;
+        for (i = 0; i < 16; i++) w[i] = m[i];
+        for (i = 16; i < 64; i++) {
+            var x = w[i - 15], y = w[i - 2];
+            var s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+            var s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+        }
+        var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+        for (i = 0; i < 64; i++) {
+            var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+            var t1 = (h + S1 + ((e & f) ^ (~e & g)) + K256[i] + w[i]) | 0;
+            var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+            var t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+            h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+        }
+        H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+        H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    function sha256(data) {
+        var H = new Int32Array(INIT256), len = data.length, total = (((len + 9 + 63) >> 6) << 6), buf = new Uint8Array(total);
+        buf.set(data); buf[len] = 0x80;
+        var dv = new DataView(buf.buffer); dv.setUint32(total - 4, (len * 8) >>> 0); dv.setUint32(total - 8, Math.floor(len / 0x20000000));
+        var m = new Int32Array(16);
+        for (var off = 0; off < total; off += 64) { for (var i = 0; i < 16; i++) m[i] = dv.getInt32(off + i * 4); block(H, m); }
+        var out = new Uint8Array(32), ov = new DataView(out.buffer);
+        for (i = 0; i < 8; i++) ov.setInt32(i * 4, H[i]);
+        return out;
+    }
+    function concat(a, b) { var r = new Uint8Array(a.length + b.length); r.set(a); r.set(b, a.length); return r; }
+    function padWords(key, xor) {   // كتلة المفتاح (64 بايت) XOR النمط → 16 كلمة
+        var u = new Uint8Array(64), i; for (i = 0; i < 64; i++) u[i] = (i < key.length ? key[i] : 0) ^ xor;
+        var dv = new DataView(u.buffer), m = new Int32Array(16); for (i = 0; i < 16; i++) m[i] = dv.getInt32(i * 4); return m;
+    }
+    function hmac(key, msg) {
+        if (key.length > 64) key = sha256(key);
+        var ip = new Uint8Array(64), op = new Uint8Array(64);
+        for (var i = 0; i < 64; i++) { var kb = i < key.length ? key[i] : 0; ip[i] = kb ^ 0x36; op[i] = kb ^ 0x5c; }
+        return sha256(concat(op, sha256(concat(ip, msg))));
+    }
+    function pbkdf2JS(pw, salt, iter) {
+        if (pw.length > 64) pw = sha256(pw);
+        var u0 = hmac(pw, concat(salt, new Uint8Array([0, 0, 0, 1]))), dv0 = new DataView(u0.buffer), i, n;
+        var Hi = new Int32Array(INIT256), Ho = new Int32Array(INIT256);
+        block(Hi, padWords(pw, 0x36)); block(Ho, padWords(pw, 0x5c));
+        var u = new Int32Array(8), t = new Int32Array(8), hi = new Int32Array(8), ho = new Int32Array(8), m = new Int32Array(16);
+        for (i = 0; i < 8; i++) { u[i] = dv0.getInt32(i * 4); t[i] = u[i]; }
+        for (n = 1; n < iter; n++) {
+            hi.set(Hi); for (i = 0; i < 8; i++) m[i] = u[i]; m[8] = 0x80000000 | 0; for (i = 9; i < 15; i++) m[i] = 0; m[15] = 768; block(hi, m);
+            ho.set(Ho); for (i = 0; i < 8; i++) m[i] = hi[i]; m[8] = 0x80000000 | 0; for (i = 9; i < 15; i++) m[i] = 0; m[15] = 768; block(ho, m);
+            for (i = 0; i < 8; i++) { u[i] = ho[i]; t[i] ^= u[i]; }
+        }
+        var out = new Uint8Array(32), ov = new DataView(out.buffer); for (i = 0; i < 8; i++) ov.setInt32(i * 4, t[i]); return out;
+    }
+    function toHex(u8) { var s = ''; for (var i = 0; i < u8.length; i++) s += (u8[i] < 16 ? '0' : '') + u8[i].toString(16); return s; }
+    async function derive(pw, salt, iter) {
+        var enc = new TextEncoder(), pwB = enc.encode(String(pw)), saltB = enc.encode(String(salt));
+        try {
+            if (window.crypto && crypto.subtle) {
+                var key = await crypto.subtle.importKey('raw', pwB, 'PBKDF2', false, ['deriveBits']);
+                var bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltB, iterations: iter, hash: 'SHA-256' }, key, 256);
+                return toHex(new Uint8Array(bits));
+            }
+        } catch (e) { /* يكمل بالنسخة البرمجية */ }
+        await new Promise(function (r) { setTimeout(r, 0); });
+        return toHex(pbkdf2JS(pwB, saltB, iter));
+    }
+    function randSalt() { var a = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach(function (_, i) { a[i] = Math.floor(Math.random() * 256); }); return toHex(a); }
+    function sameStr(a, b) { a = String(a); b = String(b); if (a.length !== b.length) return false; var d = 0; for (var i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
+
+    /* ───────── ① كلمات السر ───────── */
+    function isPlain(u) { return !!u && typeof u.password === 'string' && u.password !== ''; }
+    async function hashUser(u) {
+        var salt = randSalt();
+        u.pwHash = await derive(u.password, salt, ITER); u.pwSalt = salt; u.pwAlgo = ALGO; u.pwIter = ITER;
+        u.password = '';
+    }
+    async function hashAll() {
+        var n = 0, list = (appUsers || []).filter(isPlain);
+        for (var i = 0; i < list.length; i++) { await hashUser(list[i]); n++; }
+        return n;
+    }
+    async function verifyPw(u, pw) {
+        if (!u) return false;
+        if (isPlain(u)) return sameStr(pw, u.password);   // v105.1: كلمة سر نصية موجودة = الأحدث (اتغيّرت من نسخة بلا تشفير) فتُقدَّم على الـhash القديم
+        if (u.pwHash) return sameStr(await derive(pw, u.pwSalt || '', u.pwIter || ITER), u.pwHash);
+        return false;
+    }
+    function setTransient(u, pw) { Object.defineProperty(u, 'password', { value: pw, enumerable: false, configurable: true, writable: true }); }   // فى الذاكرة فقط، لا يُحفَظ ولا يُرفَع
+    function clearTransient(u) { Object.defineProperty(u, 'password', { value: '', enumerable: true, configurable: true, writable: true }); }
+
+    if (CFG.hash && typeof saveUsers === 'function') {
+        var _saveUsers105 = saveUsers;
+        saveUsers = function () {
+            var self = this, args = arguments;
+            if (!(appUsers || []).some(isPlain)) return _saveUsers105.apply(self, args);
+            return hashAll().then(function () { return _saveUsers105.apply(self, args); });
+        };
+    }
+    if (CFG.hash && typeof verifyAdminPassword === 'function') {
+        var _vap105 = verifyAdminPassword;
+        verifyAdminPassword = async function () {
+            var u = (appUsers || []).filter(function (x) { return x.name === currentUserName; })[0];
+            if (!u || !u.pwHash || isPlain(u)) return _vap105.apply(this, arguments);   // v105.1: لو فيه نص جديد يتحقق الأصل منه مباشرة
+            var orig = window.asyncPrompt;
+            window.asyncPrompt = async function () {
+                var v = await orig.apply(this, arguments);
+                if (v !== null && await verifyPw(u, v)) setTransient(u, v);
+                return v;
+            };
+            try { return await _vap105.apply(this, arguments); }
+            finally { window.asyncPrompt = orig; clearTransient(u); }
+        };
+    }
+
+    /* ───────── ② قفل الدخول ───────── */
+    var GK = 'al_oula_login_guard_v1', MAXF = 5;
+    function gRead() { try { return JSON.parse(localStorage.getItem(GK) || '{}') || {}; } catch (e) { return {}; } }
+    function gWrite(o) { try { localStorage.setItem(GK, JSON.stringify(o)); } catch (e) {} }
+    function lockLeft(id) { var g = gRead()[id]; return g && g.until && g.until > Date.now() ? g.until - Date.now() : 0; }
+    function regFail(id) {
+        var all = gRead(), g = all[id] || { n: 0, lvl: 0, until: 0 };
+        g.n++;
+        if (g.n >= MAXF) { g.lvl++; g.n = 0; g.until = Date.now() + Math.min(60, 5 * Math.pow(2, g.lvl - 1)) * 60000; }
+        all[id] = g; gWrite(all);
+    }
+    function regOk(id) { var all = gRead(); if (all[id]) { delete all[id]; gWrite(all); } }
+    function showErr(msg) { var e = document.getElementById('login-error'); if (e) { e.innerText = msg; e.style.display = 'block'; } }
+    function lockMsg(ms) { return '⛔ تم إيقاف الدخول مؤقتًا لكثرة المحاولات الخاطئة — حاول بعد ' + Math.ceil(ms / 60000) + ' دقيقة'; }
+
+    var pendingAfter = null;
+    if (typeof login === 'function' && (CFG.hash || CFG.lock)) {
+        var _login105 = login;
+        login = async function () {
+            var selEl = document.getElementById('user-type'), passEl = document.getElementById('login-pass');
+            var uid = selEl ? selEl.value : '', pass = passEl ? passEl.value : '';
+            var u = uid ? (appUsers || []).filter(function (x) { return x.id === uid; })[0] : null;
+            if (!u || !pass) return _login105.apply(this, arguments);              // الأصل يعرض رسائله (اختر المستخدم / أدخل كلمة السر)
+            if (CFG.lock) {
+                var left = lockLeft(uid);
+                if (left) { showErr(lockMsg(left)); if (passEl) passEl.value = ''; return; }
+            }
+            var ok = await verifyPw(u, pass);
+            if (!ok) {
+                if (CFG.lock) { regFail(uid); var l2 = lockLeft(uid); if (l2) { var r0 = await _login105.apply(this, arguments); showErr(lockMsg(l2)); return r0; } }
+                return _login105.apply(this, arguments);                           // كلمة خاطئة: رسالة الأصل
+            }
+            if (CFG.lock) regOk(uid);
+            var injected = false;
+            if (u.pwHash && !isPlain(u)) { setTransient(u, pass); injected = true; }   // v105.1: لا نُمرِّر/نمسح لو فيه نص جديد (يُشفَّر تلقائيًا بعد التحميل)              // ليمرّ فحص الأصل (pass === user.password) فى الذاكرة فقط
+            pendingAfter = { id: uid, pass: pass };
+            try { return await _login105.apply(this, arguments); }
+            finally { if (injected) clearTransient(u); }
+        };
+    }
+
+    async function forceChange(u) {
+        for (var i = 0; i < 3; i++) {
+            var np = await asyncPrompt('🔐 كلمة السر الحالية افتراضية وغير آمنة.\nأدخل كلمة سر جديدة (8 أحرف على الأقل):');
+            if (np === null) break;
+            np = String(np).trim();
+            if (np.length < 8 || DEFAULTS.indexOf(np) >= 0) { alert('❌ كلمة السر ضعيفة: يجب ألا تقل عن 8 أحرف وألا تكون الافتراضية.'); continue; }
+            var np2 = await asyncPrompt('أعد إدخال كلمة السر الجديدة للتأكيد:');
+            if (np2 === null) break;
+            if (String(np2).trim() !== np) { alert('❌ كلمتا السر غير متطابقتين.'); continue; }
+            u.password = np; await hashAll(); saveUsers();
+            try { logAudit('تغيير كلمة السر', 'أمان', 'تم تغيير كلمة السر الافتراضية للمستخدم ' + u.name, {}); } catch (e) {}
+            alert('✅ تم تغيير كلمة السر.'); return true;
+        }
+        alert('⚠️ كلمة السر ما زالت افتراضية — غيّرها من الإعدادات ← إدارة المستخدمين.');
+        return false;
+    }
+
+    /* ───────── ③ تنقية البيانات ───────── */
+    var DANGER = /<\s*\/?\s*(script|iframe|object|embed|svg|math|link|meta|style|base|form|img)\b|<[^>]{0,300}?\bon[a-z]+\s*=|["'`]\s*on[a-z]+\s*=|javascript\s*:/i;
+    var scrubbedCount = 0;
+    function cleanStr(s) { return s.replace(/</g, '＜').replace(/>/g, '＞').replace(/\b(on[a-z]+)\s*=/ig, '$1＝').replace(/javascript\s*:/ig, 'javascript :'); }
+    function scrubNode(o, depth) {
+        if (!o || typeof o !== 'object' || depth > 9) return;
+        var keys = Array.isArray(o) ? null : Object.keys(o), n = keys ? keys.length : o.length;
+        for (var i = 0; i < n; i++) {
+            var k = keys ? keys[i] : i, v = o[k];
+            if (typeof v === 'string') {
+                if (v.length > 2 && v.length < 300000 && v.indexOf('data:') !== 0 && DANGER.test(v)) { o[k] = cleanStr(v); scrubbedCount++; }
+            } else if (v && typeof v === 'object') scrubNode(v, depth + 1);
+        }
+    }
+    function scrubAll() {
+        if (!CFG.scrub) return 0;
+        scrubbedCount = 0;
+        try { Object.keys(appData || {}).forEach(function (k) { if (k !== 'selected' && k !== 'currentView') scrubNode(appData[k], 0); }); scrubNode(appUsers, 0); } catch (e) {}
+        if (scrubbedCount) { try { console.warn('🛡️ v105: تمت تنقية ' + scrubbedCount + ' قيمة تحتوي أكواد مشبوهة'); logAudit('تنقية بيانات', 'أمان', 'تمت تنقية ' + scrubbedCount + ' قيمة تحتوي أكواد مشبوهة', {}); } catch (e) {} }
+        return scrubbedCount;
+    }
+
+    if (typeof saveData === 'function') {
+        var _saveData105 = saveData;
+        saveData = function () { try { scrubAll(); } catch (e) {} return _saveData105.apply(this, arguments); };
+    }
+    if (typeof handleConflict === 'function') {
+        var _hc105 = handleConflict;
+        handleConflict = async function () { var r = await _hc105.apply(this, arguments); try { scrubAll(); } catch (e) {} return r; };
+    }
+    if (typeof initializeData === 'function') {
+        var _init105 = initializeData;
+        initializeData = async function () {
+            var r = await _init105.apply(this, arguments);
+            try { scrubAll(); } catch (e) {}
+            // بعد اكتمال تحميل البيانات: ترحيل كلمات السر القديمة + إلزام تغيير الافتراضية (للمدير)
+            var p = pendingAfter; pendingAfter = null;
+            try {
+                if (p && currentUser === 'admin') {
+                    if (CFG.hash && (appUsers || []).some(isPlain)) { await hashAll(); saveUsers(); console.log('🔐 v105: تم تشفير كلمات سر المستخدمين'); }
+                    var me = (appUsers || []).filter(function (x) { return x.id === p.id; })[0];
+                    if (me && DEFAULTS.indexOf(p.pass) >= 0) await forceChange(me);
+                } else if (p && currentUser !== 'admin' && DEFAULTS.indexOf(p.pass) >= 0) {
+                    alert('⚠️ كلمة سرك الحالية افتراضية — اطلب من المدير تغييرها من إدارة المستخدمين.');
+                }
+            } catch (e) { console.warn('v105 after-login:', e); }
+            return r;
+        };
+    }
+
+    /* مراقبة العناصر المضافة للصفحة: إزالة الخصائص التنفيذية غير المستخدمة فى التطبيق */
+    if (CFG.scrub && window.MutationObserver) {
+        var OK_ATTR = { onclick: 1, onchange: 1, oninput: 1, ondblclick: 1 };
+        var OK_VAL = /^\s*this\.(parentElement\.)?style\.[a-zA-Z]+\s*=\s*(['"])[^'"<>]*\2\s*;?\s*$/;
+        var strip = function (el) {
+            if (el.nodeType !== 1 || !el.hasAttributes()) return;
+            var at = el.attributes, rm = [];
+            for (var i = 0; i < at.length; i++) {
+                var nm = at[i].name.toLowerCase(), val = at[i].value;
+                if (nm.indexOf('on') === 0 && !OK_ATTR[nm] && !OK_VAL.test(val)) rm.push(at[i].name);
+                else if ((nm === 'href' || nm === 'src' || nm === 'action' || nm === 'formaction') && /^\s*javascript\s*:/i.test(val)) rm.push(at[i].name);
+            }
+            rm.forEach(function (a) { el.removeAttribute(a); });
+        };
+        new MutationObserver(function (muts) {
+            muts.forEach(function (m) {
+                m.addedNodes.forEach(function (n) {
+                    if (n.nodeType !== 1) return;
+                    strip(n);
+                    if (n.firstElementChild) { var all = n.getElementsByTagName('*'); for (var i = 0; i < all.length; i++) strip(all[i]); }
+                });
+            });
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    /* ───────── ④ فحص الملفات المرفوعة ───────── */
+    if (CFG.upload && window.FileReader && window.File) {
+        var MB = 1024 * 1024, MAX_IMG = 20 * MB, MAX_PDF = 25 * MB, MAX_JSON = 200 * MB;
+        var rejectMsgAt = 0;
+        var deny = function (reader, msg) {
+            if (Date.now() - rejectMsgAt > 1500) { rejectMsgAt = Date.now(); try { alert(msg); } catch (e) {} }
+            setTimeout(function () { try { reader.dispatchEvent(new ProgressEvent('error')); reader.dispatchEvent(new ProgressEvent('loadend')); } catch (e) {} }, 0);
+        };
+        var sniff = function (b) {   // يحدد النوع الحقيقى من أول بايتات الملف
+            if (b.length >= 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image';
+            if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'image';
+            if (b.length >= 4 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'image';
+            if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image';
+            if (b.length >= 2 && b[0] === 0x42 && b[1] === 0x4D) return 'image';
+            if (b.length >= 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return 'pdf';
+            return '';
+        };
+        var _rdu = FileReader.prototype.readAsDataURL;
+        FileReader.prototype.readAsDataURL = function (blob) {
+            var self = this, args = arguments;
+            if (!(blob instanceof Blob) || blob.type === 'image/jpeg' && !(blob instanceof File)) return _rdu.apply(self, args);   // ملفات يولّدها التطبيق نفسه (لوجو/ضغط الصور)
+            var declared = (blob.type || '').toLowerCase();
+            if (declared === 'image/svg+xml') return deny(self, '⛔ ملفات SVG غير مسموحة — ارفع صورة JPG أو PNG.');
+            var cap = declared === 'application/pdf' ? MAX_PDF : MAX_IMG;
+            if (blob.size > cap) return deny(self, '⛔ حجم الملف (' + Math.round(blob.size / MB) + ' ميجا) أكبر من المسموح (' + Math.round(cap / MB) + ' ميجا).');
+            var head = blob.slice(0, 16);
+            var go = function (u8) {
+                var kind = sniff(u8);
+                if (!kind) return deny(self, '⛔ نوع الملف غير مسموح — المسموح فقط: صور (JPG / PNG / GIF / WEBP) وملفات PDF.');
+                if (kind === 'pdf' && blob.size > MAX_PDF) return deny(self, '⛔ ملف PDF أكبر من ' + Math.round(MAX_PDF / MB) + ' ميجا.');
+                if (kind === 'image' && blob.size > MAX_IMG) return deny(self, '⛔ الصورة أكبر من ' + Math.round(MAX_IMG / MB) + ' ميجا.');
+                _rdu.apply(self, args);
+            };
+            var fr = new FileReader();
+            fr.onload = function () { go(new Uint8Array(fr.result)); };
+            fr.onerror = function () { deny(self, '⛔ تعذّر فحص الملف.'); };
+            fr.readAsArrayBuffer(head);
+        };
+        var _rdt = FileReader.prototype.readAsText;
+        FileReader.prototype.readAsText = function (blob) {
+            if (blob instanceof Blob && blob.size > MAX_JSON) return deny(this, '⛔ الملف كبير جدًا (' + Math.round(blob.size / MB) + ' ميجا).');
+            return _rdt.apply(this, arguments);
+        };
+    }
+
+    console.log('%c🔐 v105: تشفير كلمات السر + قفل الدخول + تنقية البيانات + فحص الملفات المرفوعة', 'color:#1565c0;font-weight:bold;font-size:13px');
+})();
+</script>
+
 <script id="aloula-fx-v2-js">
 /* AL OULA — FX LAYER v2 (مؤثرات فقط: لا تقرأ ولا تكتب أي بيانات ولا تستدعي أي دالة من التطبيق) */
 (function () {
@@ -47050,5 +47540,751 @@ async function processInstallments(editIndex) {
 })();
 </script>
 
+
+<!-- ══════════════════════════════════════════════════════════════════
+     v106 — طبقة التحسين البصرى + شات الإدارة المؤقت
+     (إضافة فقط: لا تعدّل ولا تحذف أى دالة أو سطر أصلى. كلها قواعد CSS مُضافة بعد الأنماط الأصلية
+      + سكربت مستقل لا يغلّف أى دالة ولا يلمس بيانات الشركة.)
+     للإيقاف الطارئ: احذف هذا القسم كاملًا (من <!-- v106 START حتى v106 END) فيعود الملف كما كان.
+     ══════════════════════════════════════════════════════════════════ -->
+<!-- v106 START -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap">
+<style id="aloula-visual-v106">
+/* ───────── 1) رموز التصميم (ألوان الهوية كما هى: أحمر داكن + ذهبى) ───────── */
+:root{
+  --v106-red:#8b1a1a; --v106-red-2:#a92727; --v106-dark:#321315; --v106-gold:#d6a84f;
+  --v106-soft:#fff5f4; --v106-line:#e8eaee; --v106-ink:#1f2937; --v106-muted:#6b7280;
+  --v106-ring:0 0 0 4px rgba(139,26,26,.10);
+  --v106-sh1:0 1px 2px rgba(25,31,40,.05),0 4px 14px rgba(25,31,40,.06);
+  --v106-sh2:0 2px 4px rgba(25,31,40,.05),0 14px 36px rgba(25,31,40,.12);
+  --v106-ease:cubic-bezier(.22,.8,.24,1);
+}
+html{scrollbar-width:thin;scrollbar-color:#cdb0ad transparent}
+body,button,input,select,textarea{font-family:"Cairo","Segoe UI",Tahoma,Arial,sans-serif!important}
+body{font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:rgba(214,168,79,.35);color:#321315}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:#d9c4c1;border-radius:9px;border:2px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:#b98f8a;background-clip:content-box;border:2px solid transparent}
+
+/* ───────── 2) الإطار العام: الهيدر + القوائم الجانبية ───────── */
+#sector-1>div:first-child{
+  background:linear-gradient(180deg,#fff 0%,#fcfaf9 100%)!important;
+  border-bottom:0!important;
+  box-shadow:0 1px 0 var(--v106-line),0 3px 0 -1px rgba(214,168,79,.55),0 8px 22px rgba(25,31,40,.05)!important;
+}
+#current-command-text{font-weight:800!important;letter-spacing:.1px}
+#sector-2,#sector-3{
+  background:linear-gradient(180deg,#fff,#fdfbfa)!important;
+  border-radius:22px!important;
+}
+#sector-2>div:first-of-type:not(.sector-logo-bg):not(.clock-card),
+#sector-3>div:first-of-type:not(.sector-logo-bg){
+  letter-spacing:.2px;border-bottom:0!important;position:relative;padding-bottom:8px!important
+}
+#sector-2>div:first-of-type:not(.sector-logo-bg):not(.clock-card)::after,
+#sector-3>div:first-of-type:not(.sector-logo-bg)::after{
+  content:"";display:block;width:46px;height:3px;border-radius:3px;margin:7px auto 0;
+  background:linear-gradient(90deg,var(--v106-gold),var(--v106-red))
+}
+#sector-2 .clock-card{
+  border:1px solid #f1dedb!important;border-radius:16px!important;
+  background:linear-gradient(145deg,#fff8f6,#fff 70%)!important;box-shadow:var(--v106-sh1)!important
+}
+#sector-2 #clock{font-variant-numeric:tabular-nums;letter-spacing:1px;color:var(--v106-red)!important}
+#sector-2 .cmd-btn{
+  display:flex!important;align-items:center;gap:10px;min-height:42px!important;font-weight:700;font-size:13px;
+  border-radius:13px!important;position:relative;overflow:hidden;
+  transition:background .2s var(--v106-ease),box-shadow .2s var(--v106-ease),transform .2s var(--v106-ease)!important
+}
+#sector-2 .cmd-btn i{
+  flex:none;width:30px!important;height:30px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:9px;background:#f6f1f0;font-size:13px;transition:background .2s,transform .2s!important
+}
+#sector-2 .cmd-btn:hover i{background:#fff;transform:scale(1.08)!important}
+#sector-2 .cmd-btn::before{
+  content:"";position:absolute;inset-block:9px;inset-inline-start:0;width:3px;border-radius:3px;
+  background:var(--v106-red);opacity:0;transform:scaleY(.3);transition:opacity .2s,transform .2s var(--v106-ease)
+}
+#sector-2 .cmd-btn:hover::before{opacity:1;transform:scaleY(1)}
+#sector-3 .sec3-btn{
+  display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  border-radius:16px!important;background:linear-gradient(180deg,#fff,#faf7f6)!important;
+  border:1px solid var(--v106-line)!important;box-shadow:var(--v106-sh1);font-weight:800;font-size:12px;
+  transition:transform .2s var(--v106-ease),box-shadow .2s var(--v106-ease),border-color .2s!important
+}
+#sector-3 .sec3-btn i{font-size:19px;transition:transform .2s var(--v106-ease)!important}
+#sector-3 .sec3-btn:hover{border-color:#ecc9c5!important;box-shadow:var(--v106-sh2)!important;transform:translateY(-2px)!important}
+#sector-3 .sec3-btn:hover i{transform:scale(1.14) rotate(-4deg)!important}
+#sector-4{border-bottom-width:4px!important;background:linear-gradient(180deg,#fff,#fdfbfa)!important}
+#sector-4 .action-btn-main{border-radius:14px!important;font-weight:800}
+#sector-4 .btn-icon-wrap{border-radius:10px!important;transition:transform .2s var(--v106-ease)}
+#sector-4 .action-btn-main:hover:not(:disabled) .btn-icon-wrap{transform:scale(1.1)}
+
+/* ───────── 3) محتوى الصفحات: بطاقات / أزرار / نماذج ───────── */
+#main-content{scroll-behavior:smooth}
+#sector-1 h1,#sector-1 h2,#sector-1 h3{letter-spacing:.1px;color:#27202a}
+#sector-1 .card,#sector-1 .panel,#sector-1 .section,#sector-1 .card-item,#sector-1 .al-stat,#sector-1 .av-stat{
+  border-radius:16px!important;transition:box-shadow .22s var(--v106-ease),transform .22s var(--v106-ease),border-color .22s!important
+}
+#sector-1 .card-item{border-right-width:5px!important;box-shadow:var(--v106-sh1)!important}
+#sector-1 .card-item:hover{box-shadow:var(--v106-sh2)!important}
+#sector-1 .al-stat,#sector-1 .av-stat{
+  background:linear-gradient(160deg,#fff 0%,#fcf8f7 100%)!important;position:relative;overflow:hidden
+}
+#sector-1 .al-stat::after,#sector-1 .av-stat::after{
+  content:"";position:absolute;inset-inline:0;top:0;height:3px;
+  background:linear-gradient(90deg,var(--v106-red),var(--v106-gold));opacity:.85
+}
+#sector-1 .al-stat:hover,#sector-1 .av-stat:hover{transform:translateY(-3px);box-shadow:var(--v106-sh2)!important}
+#sector-1 button{border-radius:11px;font-weight:700;letter-spacing:.1px}
+#sector-1 button:focus-visible,#sector-2 button:focus-visible,#sector-3 button:focus-visible,#sector-4 button:focus-visible{
+  outline:3px solid rgba(214,168,79,.55)!important;outline-offset:2px
+}
+#sector-1 input::placeholder,#sector-1 textarea::placeholder{color:#a3a9b3;font-weight:500}
+#sector-1 input:not([type=checkbox]):not([type=radio]):hover,#sector-1 select:hover,#sector-1 textarea:hover{border-color:#cfd5dc!important}
+#sector-1 input:not([type=checkbox]):not([type=radio]):focus,#sector-1 select:focus,#sector-1 textarea:focus{
+  border-color:rgba(139,26,26,.6)!important;box-shadow:var(--v106-ring)!important
+}
+#sector-1 input[type=checkbox],#sector-1 input[type=radio]{accent-color:var(--v106-red)}
+#sector-1 label{font-size:12.5px;color:#4a5260}
+#sector-1 hr{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--v106-line),transparent)}
+
+/* ───────── 4) الجداول: أوضح وأهدأ للعين ───────── */
+#sector-1 table{font-variant-numeric:tabular-nums}
+#sector-1 table th{
+  font-size:12.5px;letter-spacing:.2px;text-shadow:0 1px 0 rgba(0,0,0,.12);
+  background:linear-gradient(135deg,#7a1616,#a52626)!important
+}
+#sector-1 table th:first-child{border-top-right-radius:12px}
+#sector-1 table th:last-child{border-top-left-radius:12px}
+#sector-1 table td{font-size:13px;transition:background .15s}
+#sector-1 table tbody tr{transition:box-shadow .15s}
+#sector-1 table tbody tr:hover td{background:#fff3f1!important}
+#sector-1 table tbody tr:hover{box-shadow:inset 3px 0 0 var(--v106-gold)}
+#sector-1 table tfoot td,#sector-1 table tr.total td,#sector-1 table tr.totals td{
+  background:#f6efee!important;font-weight:900;border-top:2px solid #e6cfcb!important
+}
+
+/* ───────── 5) النوافذ المنبثقة والإشعارات (النوافذ الموجودة فقط) ───────── */
+#v92-modal>div,.modal-content,.modal-box{
+  border-radius:20px!important;box-shadow:0 30px 80px rgba(20,10,10,.28)!important;border:1px solid rgba(255,255,255,.6)
+}
+#v92-modal{backdrop-filter:blur(3px)}
+
+/* ───────── 6) شاشة الدخول: لمسة ذهبية وتفاصيل أنعم ───────── */
+#login-screen .login-box{position:relative;overflow:hidden}
+#login-screen .login-box::before{
+  content:"";position:absolute;inset-inline:0;top:0;height:5px;
+  background:linear-gradient(90deg,var(--v106-red),var(--v106-gold),var(--v106-red))
+}
+#login-screen .login-box h2{font-weight:900!important;letter-spacing:.2px}
+#login-screen .login-input{font-size:14.5px;transition:border-color .2s,box-shadow .2s,background .2s!important}
+#login-screen .login-input:hover{background:#fff!important}
+#login-screen .login-btn{font-size:15px;letter-spacing:.3px;transition:transform .2s var(--v106-ease),box-shadow .2s var(--v106-ease)!important}
+#login-screen .login-btn:active{transform:scale(.985)}
+#login-error{background:#fdecea;border:1px solid #f5c6c2;color:#a12622!important;border-radius:10px;padding:8px 12px;font-weight:700;line-height:1.6}
+
+/* ───────── 7) الأيقونة العائمة الموجودة (طلبات الموظفين): مساحة لمس أريح ───────── */
+#v92-pill{width:34px!important;height:34px!important;border-radius:17px 0 0 17px!important;box-shadow:-2px 4px 14px rgba(0,0,0,.22)!important}
+
+/* ───────── 8) الجوال ───────── */
+@media (max-width:768px){
+  body{font-size:14px}
+  #mobile-nav .mob-nav-btn{min-height:48px;font-weight:700}
+  #mobile-header{backdrop-filter:blur(10px)}
+  #sector-1 button{min-height:40px}
+  #sector-1 .card-item,#sector-1 .al-stat,#sector-1 .av-stat{border-radius:14px!important}
+}
+@media print{
+  #v106c-fab,#v106c-panel{display:none!important}
+  #sector-1 .al-stat::after,#sector-1 .av-stat::after{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  #sector-2 .cmd-btn::before{transition:none}
+}
+
+/* ═════════════ شات الإدارة ═════════════ */
+#v106c-fab{
+  position:fixed;right:0;z-index:2147482100;width:36px;height:36px;border-radius:18px 0 0 18px;cursor:pointer;
+  background:linear-gradient(135deg,#321315,#8b1a1a);color:#fff;display:flex;align-items:center;justify-content:center;
+  box-shadow:-2px 5px 16px rgba(50,19,21,.35);border:0;padding:0;opacity:.92;touch-action:none;
+  transition:width .2s var(--v106-ease),opacity .2s
+}
+#v106c-fab:hover,#v106c-fab:focus-visible{width:42px;opacity:1}
+#v106c-fab .ic{width:17px;height:17px;pointer-events:none}
+.ic{fill:currentColor;display:block}
+#v106c-fab.off{background:linear-gradient(135deg,#6b7280,#4b5563)}
+#v106c-fab .bdg{
+  position:absolute;top:-6px;left:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#d6a84f;color:#321315;
+  font:900 10px/17px Cairo,sans-serif;text-align:center;display:none;box-shadow:0 0 0 2px #fff
+}
+#v106c-panel{
+  position:fixed;z-index:2147482500;right:48px;bottom:18px;width:min(360px,calc(100vw - 24px));height:min(520px,calc(100vh - 36px));
+  display:none;flex-direction:column;background:#fff;border-radius:20px;overflow:hidden;direction:rtl;
+  box-shadow:0 24px 70px rgba(20,10,10,.32),0 0 0 1px rgba(50,19,21,.08);font-family:Cairo,"Segoe UI",Tahoma,sans-serif;color:#1f2937
+}
+#v106c-panel.open{display:flex;animation:v106cin .22s var(--v106-ease)}
+@keyframes v106cin{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+#v106c-panel .hd{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;color:#fff;
+  background:linear-gradient(135deg,#321315,#7a1616 70%,#8b1a1a);position:relative
+}
+#v106c-panel .hd::after{content:"";position:absolute;inset-inline:0;bottom:0;height:3px;background:linear-gradient(90deg,#d6a84f,transparent)}
+#v106c-panel .hd .tt{flex:1;min-width:0}
+#v106c-panel .hd b{display:block;font-size:14.5px;font-weight:900}
+#v106c-panel .hd small{display:block;font-size:11px;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#v106c-panel .hd button .ic,#v106c-panel .ft button .ic{width:16px;height:16px}
+#v106c-panel .hd button{
+  border:0;background:rgba(255,255,255,.14);color:#fff;width:30px;height:30px;border-radius:9px;cursor:pointer;font-size:13px;
+  display:inline-flex;align-items:center;justify-content:center;transition:background .15s
+}
+#v106c-panel .hd button:hover{background:rgba(255,255,255,.28)}
+#v106c-panel .st{width:9px;height:9px;border-radius:50%;background:#9ca3af;flex:none;box-shadow:0 0 0 3px rgba(255,255,255,.15)}
+#v106c-panel .st.ok{background:#34d399}
+#v106c-panel .st.bad{background:#f87171}
+#v106c-panel .sw{display:none;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:#fbf6ea;border-bottom:1px solid #f0e3c4;font-size:12.5px;font-weight:700;color:#5b4410}
+#v106c-panel .sw.show{display:flex}
+#v106c-panel .sw label{position:relative;display:inline-block;width:42px;height:24px;flex:none;cursor:pointer}
+#v106c-panel .sw input{opacity:0;width:0;height:0;position:absolute}
+#v106c-panel .sw .tg{position:absolute;inset:0;border-radius:24px;background:#c9ced6;transition:background .2s}
+#v106c-panel .sw .tg::after{content:"";position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s var(--v106-ease)}
+#v106c-panel .sw input:checked+.tg{background:#168a5a}
+#v106c-panel .sw input:checked+.tg::after{transform:translateX(-18px)}
+#v106c-panel .sw input:focus-visible+.tg{outline:3px solid rgba(214,168,79,.6);outline-offset:2px}
+#v106c-panel .on{padding:7px 12px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f0f1f4;background:#fcfcfd;max-height:62px;overflow:auto}
+#v106c-panel .on span{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:12px;background:#eef7f2;color:#13694a;display:inline-flex;align-items:center;gap:5px}
+#v106c-panel .on span::before{content:"";width:6px;height:6px;border-radius:50%;background:#22a06b}
+#v106c-panel .on span.adm{background:#fdf1f0;color:#8b1a1a}
+#v106c-panel .on span.adm::before{background:#8b1a1a}
+#v106c-panel .ms{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,#faf8f7,#f5f3f2);overscroll-behavior:contain}
+#v106c-panel .em{margin:auto;text-align:center;color:#8a8f98;font-size:12.5px;line-height:1.8;padding:20px}
+#v106c-panel .em .ic{width:34px;height:34px;color:#d9c4c1;margin:0 auto 8px}
+#v106c-panel .mg{max-width:84%;display:flex;flex-direction:column;gap:2px}
+#v106c-panel .mg.me{align-self:flex-start}
+#v106c-panel .mg.th{align-self:flex-end}
+#v106c-panel .mg .nm{font-size:11px;font-weight:800;color:#8b1a1a;padding:0 6px}
+#v106c-panel .mg.me .nm{display:none}
+#v106c-panel .bb{padding:8px 12px;border-radius:14px;font-size:13.5px;line-height:1.7;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(25,31,40,.08)}
+#v106c-panel .mg.me .bb{background:linear-gradient(135deg,#8b1a1a,#a92727);color:#fff;border-bottom-left-radius:4px}
+#v106c-panel .mg.th .bb{background:#fff;color:#1f2937;border-bottom-right-radius:4px}
+#v106c-panel .bb img{display:block;max-width:100%;max-height:220px;border-radius:10px;cursor:zoom-in;margin:2px 0}
+#v106c-panel .mg .tm{font-size:10px;color:#9aa0aa;padding:0 6px}
+#v106c-panel .mg.me .tm{text-align:left}
+#v106c-panel .sysm{align-self:center;font-size:11px;color:#7b6a3a;background:#fbf3dc;border-radius:12px;padding:3px 12px;font-weight:700}
+#v106c-panel .nt{padding:6px 12px;font-size:11px;color:#7b6a3a;background:#fbf6ea;text-align:center;border-top:1px solid #f0e3c4}
+#v106c-panel .ft{display:flex;align-items:flex-end;gap:6px;padding:10px;border-top:1px solid #eceef1;background:#fff}
+#v106c-panel .ft textarea{
+  flex:1;min-height:40px;max-height:96px;resize:none;border:1px solid #dfe3e8;border-radius:12px;padding:9px 12px;font:inherit;font-size:13.5px;
+  background:#fbfcfd;color:#1f2937;outline:0;direction:rtl;transition:border-color .15s,box-shadow .15s
+}
+#v106c-panel .ft textarea:focus{border-color:rgba(139,26,26,.6);box-shadow:0 0 0 4px rgba(139,26,26,.09);background:#fff}
+#v106c-panel .ft button{
+  flex:none;width:40px;height:40px;border-radius:12px;border:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  font-size:15px;transition:transform .15s var(--v106-ease),background .15s,opacity .15s
+}
+#v106c-panel .ft .img{background:#f4eeed;color:#8b1a1a}
+#v106c-panel .ft .img:hover{background:#ecdedc}
+#v106c-panel .ft .snd{background:linear-gradient(135deg,#7a1616,#a92727);color:#fff}
+#v106c-panel .ft .snd:hover{transform:translateY(-1px)}
+#v106c-panel .ft button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+#v106c-panel .ft button:focus-visible,#v106c-panel .hd button:focus-visible{outline:3px solid rgba(214,168,79,.65);outline-offset:2px}
+#v106c-panel .lock{
+  position:absolute;inset:0;z-index:5;background:rgba(255,255,255,.94);display:none;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:30px;gap:10px;font-weight:800;color:#4b5563;line-height:1.8
+}
+#v106c-panel .lock.show{display:flex}
+#v106c-panel .lock .ic{width:38px;height:38px;color:#c3a8a5}
+#v106c-zoom{position:fixed;inset:0;z-index:2147483300;background:rgba(15,8,8,.86);display:none;align-items:center;justify-content:center;cursor:zoom-out;padding:20px}
+#v106c-zoom.open{display:flex}
+#v106c-zoom img{max-width:96vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+@media (max-width:768px){
+  #v106c-panel{right:8px;left:8px;width:auto;bottom:66px;height:min(72vh,560px)}
+}
+@media (prefers-reduced-motion:reduce){#v106c-panel.open{animation:none}}
+</style>
+<!-- v106 END (CSS) -->
+
+<script id="aloula-staff-chat-v106">
+/* ══════════════════════════════════════════════════════════════════
+   💬 v106 — شات الإدارة المؤقت (بين الموظفين والمديرين المسجّلين دخولًا فقط)
+   • مستقل تمامًا: لا يغلّف ولا يعدّل أى دالة، ولا يقرأ/يكتب أى بيانات للشركة، ولا يمرّ على saveData/cloudSet.
+   • لا يُحفظ شىء: الرسائل فى الذاكرة فقط (لا localStorage / IndexedDB / سجل مراجعة / جدول) وتُمسح عند الخروج أو إغلاق الصفحة.
+   • النقل: Supabase Realtime (Broadcast + Presence) على قناة واحدة — لا جداول ولا SQL.
+   • المدير فقط يقدر يوقف/يفعّل الشات لكل المتصلين.
+   • الصور: تُضغط داخل المتصفح (JPEG) قبل الإرسال؛ الأنواع المقبولة JPG/PNG/GIF/WEBP؛ الحد الأقصى للأصل 20 ميجا.
+   للإيقاف الطارئ قبل هذا السكربت: window.__V106_CHAT__ = false
+   ══════════════════════════════════════════════════════════════════ */
+(function aloulaStaffChatV106() {
+    'use strict';
+    if (window.__V106_CHAT__ === false) return;
+
+    var CHANNEL = 'aloula-staff-chat-v1';
+    var MAX_TEXT = 1000, MAX_IN = 20 * 1024 * 1024, MAX_B64 = 200000, MAX_MSGS = 200;
+    var S = { started: false, ws: null, joined: false, enabled: true, open: false, unread: 0, msgs: [], online: {}, seen: {},
+              myKey: '', me: '', joinRef: '', hb: null, rc: null, rcN: 0, lastSend: 0, ref: 0, stopFlag: false };
+    var el = {};
+
+    function isAdminNow() { return typeof currentUser !== 'undefined' && currentUser === 'admin'; }
+    function myName() { return typeof currentUserName !== 'undefined' ? String(currentUserName || '') : ''; }
+    function knownUser(name) { try { return (appUsers || []).filter(function (u) { return u && u.name === name; })[0] || null; } catch (e) { return null; } }
+    function conf() {
+        try {
+            if (typeof API_BASE_URL === 'string' && /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(API_BASE_URL) && typeof API_TOKEN === 'string' && API_TOKEN)
+                return { url: API_BASE_URL.replace(/\/$/, ''), key: API_TOKEN };
+        } catch (e) {}
+        return null;
+    }
+    function nid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+    function hhmm(t) { try { return new Date(t).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+    var ICONS = {
+        chat: '<path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>',
+        image: '<path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 12h14l-4.5-6-3.5 4.5L8 13l-3 4zM8.5 7.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>',
+        send: '<path d="M3 11.5 21 3l-5 18-4.5-6.5L3 11.5zm8.5 2.2 3.3 4.7L18 7.2l-9.6 4.6 3.1 1.9z"/>',
+        close: '<path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/>',
+        off: '<path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm-1.4-.4 18.8 18.8-1.4 1.4L1.2 5z"/>'
+    };
+    function ico(n) {
+        var w = document.createElement('span'); w.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONS[n] + '</svg>';
+        return w.firstChild;
+    }
+    function h(tag, props, kids) {
+        var n = document.createElement(tag);
+        Object.keys(props || {}).forEach(function (k) {
+            if (k === 'text') n.textContent = props[k];
+            else if (k === 'cls') n.className = props[k];
+            else if (k === 'on') Object.keys(props.on).forEach(function (e) { n.addEventListener(e, props.on[e]); });
+            else n.setAttribute(k, props[k]);
+        });
+        (kids || []).forEach(function (c) { if (c) n.appendChild(c); });
+        return n;
+    }
+
+    /* ───────── الواجهة ───────── */
+    function build() {
+        if (el.fab) return;
+        var top = 72; try { top = +localStorage.getItem('al_oula_v106_fab_top') || 72; } catch (e) {}
+        el.fab = h('button', { id: 'v106c-fab', type: 'button', 'aria-label': 'شات الإدارة', title: 'شات الإدارة — اسحبه لأى مكان' });
+        el.fab.style.top = top + '%';
+        el.fab.appendChild(ico('chat'));
+        el.bdg = h('span', { cls: 'bdg' }); el.fab.appendChild(el.bdg);
+        var sy = 0, st = 0, moved = false;
+        el.fab.addEventListener('pointerdown', function (e) { sy = e.clientY; st = el.fab.getBoundingClientRect().top; moved = false; try { el.fab.setPointerCapture(e.pointerId); } catch (x) {} });
+        el.fab.addEventListener('pointermove', function (e) {
+            var dy = e.clientY - sy; if (Math.abs(dy) > 5) moved = true;
+            if (moved && e.buttons) el.fab.style.top = Math.max(8, Math.min(innerHeight - 44, st + dy)) + 'px';
+        });
+        el.fab.addEventListener('pointerup', function () {
+            if (moved) { try { localStorage.setItem('al_oula_v106_fab_top', (el.fab.getBoundingClientRect().top / innerHeight * 100).toFixed(1)); } catch (e) {} return; }
+            toggle();
+        });
+        el.fab.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+        el.st = h('span', { cls: 'st', 'aria-hidden': 'true' });
+        el.sub = h('small', { text: 'جاري الاتصال…' });
+        var closeB = h('button', { type: 'button', 'aria-label': 'إغلاق', title: 'إغلاق', on: { click: function () { toggle(false); } } }, [ico('close')]);
+        var hd = h('div', { cls: 'hd' }, [el.st, h('div', { cls: 'tt' }, [h('b', { text: 'شات الإدارة' }), el.sub]), closeB]);
+
+        el.sw = h('div', { cls: 'sw' });
+        el.swIn = h('input', { type: 'checkbox', id: 'v106c-sw', 'aria-label': 'تشغيل الشات' });
+        el.swIn.addEventListener('change', function () { setEnabled(el.swIn.checked, true); });
+        el.sw.appendChild(h('span', { text: 'تشغيل الشات لكل المستخدمين' }));
+        el.sw.appendChild(h('label', { 'for': 'v106c-sw' }, [el.swIn, h('span', { cls: 'tg' })]));
+
+        el.on = h('div', { cls: 'on', 'aria-live': 'polite' });
+        el.ms = h('div', { cls: 'ms', role: 'log', 'aria-live': 'polite' });
+        el.nt = h('div', { cls: 'nt', text: 'المحادثة مؤقتة: لا تُحفظ فى أى مكان وتُمسح عند تسجيل الخروج.' });
+
+        el.ta = h('textarea', { rows: '1', maxlength: String(MAX_TEXT), placeholder: 'اكتب رسالة…', 'aria-label': 'نص الرسالة' });
+        el.ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendText(); } });
+        el.ta.addEventListener('input', function () { el.ta.style.height = 'auto'; el.ta.style.height = Math.min(96, el.ta.scrollHeight) + 'px'; });
+        el.file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', style: 'display:none' });
+        el.file.addEventListener('change', function () { var f = el.file.files && el.file.files[0]; el.file.value = ''; if (f) sendImage(f); });
+        el.imgB = h('button', { cls: 'img', type: 'button', 'aria-label': 'إرسال صورة', title: 'إرسال صورة', on: { click: function () { el.file.click(); } } }, [ico('image')]);
+        el.sndB = h('button', { cls: 'snd', type: 'button', 'aria-label': 'إرسال', title: 'إرسال', on: { click: sendText } }, [ico('send')]);
+        var ft = h('div', { cls: 'ft' }, [el.imgB, el.ta, el.sndB, el.file]);
+
+        el.lock = h('div', { cls: 'lock' }, [ico('off'), h('div', { text: 'الشات متوقف من الإدارة حاليًا.' })]);
+        el.panel = h('div', { id: 'v106c-panel', role: 'dialog', 'aria-label': 'شات الإدارة' }, [hd, el.sw, el.on, el.ms, el.nt, ft, el.lock]);
+        el.zoom = h('div', { id: 'v106c-zoom', on: { click: function () { el.zoom.classList.remove('open'); } } }, [h('img', { alt: 'صورة مكبرة' })]);
+        document.body.appendChild(el.fab); document.body.appendChild(el.panel); document.body.appendChild(el.zoom);
+        document.addEventListener('keydown', escKey);
+        renderAll();
+    }
+    function escKey(e) {
+        if (e.key !== 'Escape') return;
+        if (el.zoom && el.zoom.classList.contains('open')) el.zoom.classList.remove('open');
+        else if (S.open) toggle(false);
+    }
+    function destroyUI() {
+        document.removeEventListener('keydown', escKey);
+        ['fab', 'panel', 'zoom'].forEach(function (k) { if (el[k] && el[k].parentNode) el[k].parentNode.removeChild(el[k]); });
+        el = {};
+    }
+    function toggle(force) {
+        S.open = typeof force === 'boolean' ? force : !S.open;
+        if (!el.panel) return;
+        el.panel.classList.toggle('open', S.open);
+        if (S.open) { S.unread = 0; renderBadge(); scrollEnd(); setTimeout(function () { try { el.ta.focus(); } catch (e) {} }, 60); }
+    }
+    function scrollEnd() { if (el.ms) el.ms.scrollTop = el.ms.scrollHeight; }
+    function renderBadge() {
+        if (!el.bdg) return;
+        el.bdg.style.display = S.unread > 0 ? 'block' : 'none';
+        el.bdg.textContent = S.unread > 9 ? '9+' : String(S.unread);
+    }
+    function renderState() {
+        if (!el.panel) return;
+        var adm = isAdminNow();
+        el.sw.classList.toggle('show', adm);
+        el.swIn.checked = S.enabled;
+        el.fab.classList.toggle('off', !S.enabled);
+        el.fab.style.display = (!S.enabled && !adm) ? 'none' : 'flex';
+        el.lock.classList.toggle('show', !S.enabled && !adm);
+        if (!S.enabled && !adm && S.open) toggle(false);
+        el.st.className = 'st ' + (S.joined ? 'ok' : (S.ws ? '' : 'bad'));
+        var n = Object.keys(S.online).length;
+        el.sub.textContent = !S.enabled ? 'متوقف من الإدارة' : (S.joined ? (n + ' متصل الآن') : 'جاري الاتصال…');
+        el.ta.disabled = el.sndB.disabled = el.imgB.disabled = !S.enabled || !S.joined;
+        el.ta.placeholder = !S.enabled ? 'الشات متوقف' : (S.joined ? 'اكتب رسالة…' : 'بانتظار الاتصال…');
+    }
+    function renderOnline() {
+        if (!el.on) return;
+        el.on.textContent = '';
+        Object.keys(S.online).forEach(function (k) {
+            var o = S.online[k]; var u = knownUser(o.name); if (!u) return;
+            el.on.appendChild(h('span', { cls: u.role === 'admin' ? 'adm' : '', text: o.name + (k === S.myKey ? ' (أنت)' : '') }));
+        });
+        el.on.style.display = el.on.childNodes.length ? 'flex' : 'none';
+    }
+    function renderMsgs() {
+        if (!el.ms) return;
+        el.ms.textContent = '';
+        if (!S.msgs.length) {
+            el.ms.appendChild(h('div', { cls: 'em' }, [ico('chat'), h('div', { text: 'مفيش رسائل لسه. ابدأ المحادثة.' }), h('div', { text: 'الرسائل مؤقتة وبتتمسح لما تخرج.' })]));
+            return;
+        }
+        S.msgs.forEach(function (m) {
+            if (m.sys) { el.ms.appendChild(h('div', { cls: 'sysm', text: m.text })); return; }
+            var bb = h('div', { cls: 'bb' });
+            if (m.text) bb.appendChild(document.createTextNode(m.text));
+            if (m.img) {
+                var im = h('img', { alt: 'صورة من ' + m.from, loading: 'lazy' });
+                im.src = m.img;
+                im.addEventListener('click', function () { el.zoom.firstChild.src = m.img; el.zoom.classList.add('open'); });
+                bb.appendChild(im);
+            }
+            el.ms.appendChild(h('div', { cls: 'mg ' + (m.mine ? 'me' : 'th') }, [h('div', { cls: 'nm', text: m.from }), bb, h('div', { cls: 'tm', text: hhmm(m.t) })]));
+        });
+        scrollEnd();
+    }
+    function renderAll() { renderState(); renderOnline(); renderMsgs(); renderBadge(); }
+    function pushMsg(m) {
+        S.msgs.push(m); if (S.msgs.length > MAX_MSGS) S.msgs.shift();
+        if (!m.mine && !m.sys) { if (!S.open || document.hidden) { S.unread++; renderBadge(); } }
+        renderMsgs();
+    }
+
+    /* ───────── الاتصال: Supabase Realtime (Phoenix protocol) ───────── */
+    function send(obj) { try { if (S.ws && S.ws.readyState === 1) { obj.ref = String(++S.ref); S.ws.send(JSON.stringify(obj)); return true; } } catch (e) {} return false; }
+    function topic() { return 'realtime:' + CHANNEL; }
+    function connect() {
+        var c = conf(); if (!c || S.stopFlag || !window.WebSocket) { if (el.sub) el.sub.textContent = 'الشات غير متاح على هذا المصدر'; return; }
+        var ws;
+        try { ws = new WebSocket(c.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(c.key) + '&vsn=1.0.0'); } catch (e) { return retry(); }
+        S.ws = ws; S.joined = false;
+        ws.onopen = function () {
+            S.rcN = 0;
+            send({ topic: topic(), event: 'phx_join', payload: { config: { broadcast: { ack: false, self: false }, presence: { key: S.myKey }, postgres_changes: [], private: false }, access_token: c.key } });
+            S.joinRef = String(S.ref);
+            clearInterval(S.hb);
+            S.hb = setInterval(function () { send({ topic: 'phoenix', event: 'heartbeat', payload: {} }); }, 25000);
+        };
+        ws.onmessage = function (ev) { var d; try { d = JSON.parse(ev.data); } catch (e) { return; } onFrame(d); };
+        ws.onclose = function () { if (S.ws === ws) { S.ws = null; S.joined = false; S.online = {}; clearInterval(S.hb); renderAll(); retry(); } };
+        ws.onerror = function () { try { ws.close(); } catch (e) {} };
+        renderAll();
+    }
+    function retry() {
+        if (S.stopFlag) return;
+        clearTimeout(S.rc);
+        S.rc = setTimeout(connect, Math.min(30000, 2000 * Math.pow(2, Math.min(S.rcN++, 4))));
+    }
+    function track() { send({ topic: topic(), event: 'presence', payload: { type: 'presence', event: 'track', payload: { name: S.me, role: isAdminNow() ? 'admin' : 'user', chatOn: S.enabled, at: Date.now() } } }); }
+    function onFrame(d) {
+        if (d.topic !== topic()) return;
+        var p = d.payload || {};
+        if (d.event === 'phx_reply') {
+            if (d.ref !== S.joinRef) return;
+            if (p.status === 'ok') { S.joined = true; track(); renderAll(); }
+            else if (p.status === 'error') { S.joined = false; if (el.sub) el.sub.textContent = 'تعذّر الاتصال بالشات'; renderAll(); }
+        } else if (d.event === 'presence_state') {
+            S.online = {}; Object.keys(p).forEach(function (k) { var m = p[k] && p[k].metas && p[k].metas[0]; if (m) S.online[k] = m; });
+            adoptAdminState(); renderAll();
+        } else if (d.event === 'presence_diff') {
+            Object.keys(p.leaves || {}).forEach(function (k) { delete S.online[k]; });
+            Object.keys(p.joins || {}).forEach(function (k) { var m = p.joins[k] && p.joins[k].metas && p.joins[k].metas[0]; if (m) S.online[k] = m; });
+            adoptAdminState(); renderAll();
+        } else if (d.event === 'broadcast') {
+            if (p.event === 'msg') onMsg(p.payload); else if (p.event === 'ctl') onCtl(p.payload);
+        }
+    }
+    function adoptAdminState() {   // من يدخل متأخرًا يعرف حالة الشات من حضور أى مدير متصل
+        var ks = Object.keys(S.online);
+        for (var i = 0; i < ks.length; i++) {
+            var o = S.online[ks[i]], u = knownUser(o.name);
+            if (u && u.role === 'admin' && o.role === 'admin' && typeof o.chatOn === 'boolean' && ks[i] !== S.myKey) { S.enabled = o.chatOn; return; }
+        }
+    }
+    function onCtl(c) {
+        if (!c || typeof c.enabled !== 'boolean') return;
+        var u = knownUser(String(c.by || '')); if (!u || u.role !== 'admin') return;   // الأمر يُقبل من مدير معروف فقط
+        S.enabled = c.enabled; renderAll();
+        pushMsg({ sys: true, text: c.enabled ? 'المدير فعّل الشات.' : 'المدير أوقف الشات.' });
+    }
+    function setEnabled(v, fromUI) {
+        if (!isAdminNow()) return;
+        S.enabled = !!v;
+        try { localStorage.setItem('al_oula_v106_chat_on', S.enabled ? '1' : '0'); } catch (e) {}
+        send({ topic: topic(), event: 'broadcast', payload: { type: 'broadcast', event: 'ctl', payload: { enabled: S.enabled, by: S.me } } });
+        track(); renderAll();
+        if (fromUI) pushMsg({ sys: true, text: S.enabled ? 'تم تفعيل الشات.' : 'تم إيقاف الشات للجميع.' });
+    }
+    function onMsg(m) {
+        if (!S.enabled || !m || typeof m !== 'object') return;
+        var from = String(m.from || '').slice(0, 60), u = knownUser(from);
+        if (!u) return;                                                 // مرسل غير معروف = يُتجاهل
+        var id = String(m.id || '').slice(0, 40); if (!id || S.seen[id]) return; S.seen[id] = 1;
+        var text = typeof m.text === 'string' ? m.text.slice(0, MAX_TEXT) : '';
+        var img = (typeof m.img === 'string' && m.img.length <= MAX_B64 + 100 && /^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(m.img)) ? m.img : '';
+        if (!text && !img) return;
+        pushMsg({ id: id, from: from, t: Date.now(), text: text, img: img, mine: false });
+    }
+
+    /* ───────── الإرسال ───────── */
+    function canSend() {
+        if (!S.enabled || !S.joined) return false;
+        var now = Date.now(); if (now - S.lastSend < 400) return false; S.lastSend = now; return true;
+    }
+    function sendText() {
+        var t = (el.ta.value || '').replace(/\s+$/g, '').slice(0, MAX_TEXT);
+        if (!t || !canSend()) return;
+        var m = { id: nid(), from: S.me, text: t };
+        if (send({ topic: topic(), event: 'broadcast', payload: { type: 'broadcast', event: 'msg', payload: m } })) {
+            S.seen[m.id] = 1; pushMsg({ id: m.id, from: S.me, t: Date.now(), text: t, img: '', mine: true });
+            el.ta.value = ''; el.ta.style.height = 'auto';
+        }
+    }
+    function sniffImg(b) {
+        return (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) ||
+               (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) ||
+               (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50);
+    }
+    function loadBitmap(file) {
+        if (window.createImageBitmap) return createImageBitmap(file);
+        return new Promise(function (res, rej) {
+            var u = URL.createObjectURL(file), im = new Image();
+            im.onload = function () { URL.revokeObjectURL(u); res(im); };
+            im.onerror = function () { URL.revokeObjectURL(u); rej(new Error('img')); };
+            im.src = u;
+        });
+    }
+    async function compress(file) {
+        var bmp = await loadBitmap(file), w0 = bmp.width || bmp.naturalWidth, h0 = bmp.height || bmp.naturalHeight;
+        var scale = Math.min(1, 1280 / Math.max(w0, h0)), q = 0.72, out = '';
+        for (var i = 0; i < 8; i++) {
+            var cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w0 * scale)); cv.height = Math.max(1, Math.round(h0 * scale));
+            var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+            out = cv.toDataURL('image/jpeg', q);
+            if (out.length <= MAX_B64) break;
+            if (q > 0.45) q -= 0.12; else scale *= 0.8;
+        }
+        try { if (bmp.close) bmp.close(); } catch (e) {}
+        if (out.length > MAX_B64) throw new Error('big');
+        return out;
+    }
+    async function sendImage(file) {
+        if (!S.enabled || !S.joined) return;
+        if (file.size > MAX_IN) { alert('⛔ حجم الصورة (' + Math.round(file.size / 1048576) + ' ميجا) أكبر من المسموح (20 ميجا).'); return; }
+        try {
+            var head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+            if (!sniffImg(head)) { alert('⛔ المسموح فقط صور JPG / PNG / GIF / WEBP.'); return; }
+            if (!canSend()) return;
+            el.imgB.disabled = true;
+            var data = await compress(file), m = { id: nid(), from: S.me, text: '', img: data };
+            if (send({ topic: topic(), event: 'broadcast', payload: { type: 'broadcast', event: 'msg', payload: m } })) {
+                S.seen[m.id] = 1; pushMsg({ id: m.id, from: S.me, t: Date.now(), text: '', img: data, mine: true });
+            } else alert('تعذّر الإرسال — تأكد من الاتصال.');
+        } catch (e) { alert('تعذّر تجهيز الصورة. جرّب صورة أخرى أصغر.'); }
+        finally { if (el.imgB) el.imgB.disabled = !S.enabled || !S.joined; }
+    }
+
+    /* ───────── دورة الحياة: يبدأ بعد الدخول وينتهي (ويُمسح كل شىء) عند الخروج ───────── */
+    function start() {
+        S.started = true; S.stopFlag = false; S.me = myName();
+        S.myKey = S.me.replace(/[^\w؀-ۿ]/g, '_').slice(0, 24) + '_' + Math.random().toString(36).slice(2, 7);
+        S.enabled = true;
+        if (isAdminNow()) { try { if (localStorage.getItem('al_oula_v106_chat_on') === '0') S.enabled = false; } catch (e) {} }
+        build(); connect();
+    }
+    function stop() {
+        S.stopFlag = true; clearInterval(S.hb); clearTimeout(S.rc);
+        try { if (S.ws) { S.ws.onclose = null; S.ws.close(); } } catch (e) {}
+        S.ws = null; S.joined = false; S.msgs = []; S.seen = {}; S.online = {}; S.unread = 0; S.open = false; S.started = false;
+        destroyUI();
+    }
+    setInterval(function () {
+        try {
+            var ls = document.getElementById('login-screen'), loggedIn = !!(typeof currentUser !== 'undefined' && currentUser && myName() && ls && ls.style.display === 'none');
+            if (loggedIn && !S.started) start();
+            else if (!loggedIn && S.started) stop();
+            else if (loggedIn && S.started && myName() !== S.me) { stop(); start(); }
+        } catch (e) {}
+    }, 1200);
+    window.addEventListener('pagehide', function () { if (S.started) stop(); });
+})();
+</script>
+<!-- v106 END -->
+
+
+<!-- GOOEY-MENU START (إضافة فقط — لا تغيّر أى كود موجود) -->
+<style id="gm-css">
+#gm-root{position:fixed;z-index:2147482500;width:56px;height:56px;direction:rtl;touch-action:none;-webkit-tap-highlight-color:transparent;display:none;font-family:inherit}
+#gm-root.gm-show{display:block}
+#gm-back{position:fixed;inset:0;z-index:2147482400;background:rgba(15,15,40,.28);opacity:0;pointer-events:none;transition:opacity .25s}
+#gm-back.gm-on{opacity:1;pointer-events:auto}
+#gm-goo,#gm-fx{position:absolute;left:50%;top:50%;width:0;height:0;pointer-events:none}
+#gm-goo{filter:url(#gm-gooey)}
+.gm-c{position:absolute;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:#4b3fd1;box-shadow:0 4px 10px rgba(0,0,0,.25);transform:translate(0,0) scale(.3);transition:transform .5s cubic-bezier(.5,1.6,.4,.9);will-change:transform}
+.gm-c.gm-m{width:56px;height:56px;margin:-28px 0 0 -28px;background:#e74c3c;transform:none;transition:none}
+.gm-f{position:absolute;left:0;top:0;width:46px;margin:-23px 0 0 -23px;transform:translate(0,0) scale(.3);opacity:0;pointer-events:none;transition:transform .5s cubic-bezier(.5,1.6,.4,.9),opacity .25s;text-align:center;cursor:pointer;border:0;background:none;padding:0;color:#fff}
+#gm-root.gm-open .gm-f{opacity:1;pointer-events:auto}
+.gm-f i{display:flex;width:46px;height:46px;align-items:center;justify-content:center;font-size:17px;color:#fff}
+.gm-f span.gm-l{position:absolute;top:50px;left:50%;transform:translateX(-50%);display:block;width:80px;font:800 10.5px/1.25 inherit;font-family:inherit;color:#fff;text-align:center;pointer-events:none;max-height:36px}
+.gm-card{position:absolute;border-radius:22px;background:rgba(22,22,52,.94);box-shadow:0 14px 40px rgba(0,0,0,.45);opacity:0;transform:scale(.85);transition:opacity .25s,transform .35s cubic-bezier(.5,1.4,.4,1);pointer-events:none;border:1px solid rgba(255,255,255,.12)}
+#gm-root.gm-open .gm-card{opacity:1;transform:none}
+.gm-f .gm-bd{position:absolute;top:-4px;right:-4px;background:#c0392b;color:#fff;border-radius:9px;min-width:17px;height:17px;font:800 10px Arial;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.gm-f:active{filter:brightness(1.2)}
+#gm-main{position:absolute;inset:0;width:56px;height:56px;border:0;background:none;color:#fff;font-size:21px;cursor:grab;padding:0;display:flex;align-items:center;justify-content:center;z-index:3}
+#gm-main i{transition:transform .35s}
+#gm-root.gm-open #gm-main i{transform:rotate(135deg)}
+#gm-main .gm-bd{position:absolute;top:-2px;right:-2px;background:#c0392b;color:#fff;border-radius:9px;min-width:17px;height:17px;font:800 10px Arial;display:none;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 0 2px #fff}
+#gm-root.gm-drag #gm-main{cursor:grabbing}
+@media print{#gm-root,#gm-back{display:none!important}}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<filter id="gm-gooey" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b"/><feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"/></filter>
+</defs></svg>
+<div id="gm-back"></div>
+<div id="gm-root" class="no-print" aria-label="قائمة الأوامر العائمة">
+  <div id="gm-goo"><div class="gm-c gm-m"></div></div>
+  <div id="gm-fx"></div>
+  <button id="gm-main" type="button" aria-label="قائمة الأوامر — اسحبه لأى مكان" title="قائمة الأوامر — اسحبه لأى مكان"><i class="fas fa-plus"></i><span class="gm-bd"></span></button>
+</div>
+<script>
+(function(){
+  var root=document.getElementById('gm-root'),goo=document.getElementById('gm-goo'),fx=document.getElementById('gm-fx'),
+      cardEl=null,cardLayer=(function(){var d=document.createElement('div');d.id='gm-cardlayer';d.style.cssText='position:absolute;left:50%;top:50%;width:0;height:0;pointer-events:none';document.getElementById('gm-root').insertBefore(d,document.getElementById('gm-goo'));return d;})(),main=document.getElementById('gm-main'),back=document.getElementById('gm-back'),mdot=main.querySelector('.gm-bd'),
+      KEY='al_oula_gm_pos',SZ=56,items=[],isOpen=false;
+  function sget(){try{return JSON.parse(localStorage.getItem(KEY));}catch(e){return null;}}
+  function sset(v){try{localStorage.setItem(KEY,JSON.stringify(v));}catch(e){}}
+  function clamp(){
+    var r=root.getBoundingClientRect(),x=Math.max(6,Math.min(innerWidth-SZ-6,r.left)),y=Math.max(6,Math.min(innerHeight-SZ-6,r.top));
+    root.style.left=x+'px';root.style.top=y+'px';
+  }
+  function place(){
+    var p=sget();
+    if(p){root.style.left=(p.x*innerWidth)+'px';root.style.top=(p.y*innerHeight)+'px';}
+    else{root.style.left='14px';root.style.top=(innerHeight*0.5)+'px';}
+    clamp();
+  }
+  function visible(el){try{return el&&getComputedStyle(el).display!=='none';}catch(e){return false;}}
+  function collect(){
+    var out=[];
+    document.querySelectorAll('#sector-2 .cmd-btn').forEach(function(b){
+      if(!visible(b))return;
+      var ic=b.querySelector('i'),lbl=(b.textContent||'').replace('↳','').trim();
+      out.push({label:lbl,icon:ic?ic.className:'fas fa-circle',click:function(){b.click();}});
+    });
+    var pill=document.getElementById('v92-pill');
+    if(pill&&visible(pill)){
+      var n=(pill.querySelector('span')||{}).textContent||'';
+      out.push({label:/طلباتي/.test(pill.title||'')?'طلباتي':'طلبات الموظفين',icon:'fas fa-inbox',badge:n,click:function(){pill.dispatchEvent(new PointerEvent('pointerdown',{clientY:0,pointerId:1,bubbles:true}));pill.dispatchEvent(new PointerEvent('pointerup',{clientY:0,pointerId:1,bubbles:true}));}});
+    }
+    var chat=document.getElementById('v106c-fab');
+    if(chat&&visible(chat)){
+      out.push({label:'شات الإدارة',icon:'fas fa-comment-dots',click:function(){chat.dispatchEvent(new PointerEvent('pointerdown',{clientY:0,pointerId:1,bubbles:true}));chat.dispatchEvent(new PointerEvent('pointerup',{clientY:0,pointerId:1,bubbles:true}));}});
+    }
+    return out;
+  }
+  function build(){
+    items=collect();
+    goo.querySelectorAll('.gm-c:not(.gm-m)').forEach(function(e){e.remove();});
+    fx.innerHTML='';if(!cardEl){cardEl=document.createElement('div');cardEl.className='gm-card';cardLayer.appendChild(cardEl);}
+    items.forEach(function(it,i){
+      var c=document.createElement('div');c.className='gm-c';goo.appendChild(c);it.c=c;
+      var f=document.createElement('button');f.type='button';f.className='gm-f';
+      f.innerHTML='<i class="'+it.icon+'"></i><span class="gm-l"></span>'+(it.badge?'<span class="gm-bd"></span>':'');
+      f.querySelector('.gm-l').textContent=it.label;
+      if(it.badge)f.querySelector('.gm-bd').textContent=it.badge;
+      f.onclick=function(e){e.stopPropagation();close();setTimeout(it.click,60);};
+      fx.appendChild(f);it.f=f;
+    });
+  }
+  function layout(open){
+    var n=items.length;if(!n)return;
+    var r=root.getBoundingClientRect(),cx=r.left+SZ/2,cy=r.top+SZ/2;
+    var CW=88,CH=92,PAD=12,cols=n>9?4:3;if(innerWidth<(cols*CW+2*PAD+16))cols=3;
+    var rows=Math.ceil(n/cols),W=cols*CW+2*PAD,H=rows*CH+2*PAD;
+    var gx=Math.max(8,Math.min(innerWidth-W-8,cx-W/2));
+    var gy=(cy>innerHeight/2)?cy-SZ/2-12-H:cy+SZ/2+12;
+    gy=Math.max(8,Math.min(innerHeight-H-8,gy));
+    if(cardEl){cardEl.style.left=(gx-cx)+'px';cardEl.style.top=(gy-cy)+'px';cardEl.style.width=W+'px';cardEl.style.height=H+'px';
+      cardEl.style.transformOrigin=(cx-gx)+'px '+(cy-gy)+'px';}
+    items.forEach(function(it,i){
+      var row=Math.floor(i/cols),col=i%cols;
+      var ax=gx+W-PAD-(col+0.5)*CW,ay=gy+PAD+row*CH+10+23;
+      var t=open?'translate('+(ax-cx)+'px,'+(ay-cy)+'px) scale(1)':'translate(0,0) scale(.3)';
+      it.c.style.transitionDelay=it.f.style.transitionDelay=(open?i*28:0)+'ms';
+      it.c.style.transform=it.f.style.transform=t;
+    });
+  }
+  function open(){
+    build();if(!items.length)return;
+    isOpen=true;root.classList.add('gm-open');back.classList.add('gm-on');
+    layout(false);void root.offsetWidth;requestAnimationFrame(function(){layout(true);});
+  }
+  function close(){isOpen=false;root.classList.remove('gm-open');back.classList.remove('gm-on');layout(false);}
+  back.addEventListener('click',close);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&isOpen)close();});
+  // سحب بحرية فى أى مكان
+  var sx=0,sy=0,ox=0,oy=0,moved=false,down=false;
+  main.addEventListener('pointerdown',function(e){down=true;moved=false;sx=e.clientX;sy=e.clientY;var r=root.getBoundingClientRect();ox=r.left;oy=r.top;try{main.setPointerCapture(e.pointerId);}catch(x){}});
+  main.addEventListener('pointermove',function(e){
+    if(!down)return;var dx=e.clientX-sx,dy=e.clientY-sy;
+    if(!moved&&Math.abs(dx)+Math.abs(dy)>7){moved=true;if(isOpen)close();root.classList.add('gm-drag');}
+    if(moved){root.style.left=Math.max(6,Math.min(innerWidth-SZ-6,ox+dx))+'px';root.style.top=Math.max(6,Math.min(innerHeight-SZ-6,oy+dy))+'px';}
+  });
+  function up(){
+    if(!down)return;down=false;root.classList.remove('gm-drag');
+    if(moved){var r=root.getBoundingClientRect();sset({x:r.left/innerWidth,y:r.top/innerHeight});}
+    else{isOpen?close():open();}
+  }
+  main.addEventListener('pointerup',up);main.addEventListener('pointercancel',function(){down=false;root.classList.remove('gm-drag');});
+  window.addEventListener('resize',function(){place();if(isOpen)layout(true);});
+  // يظهر فقط بعد تسجيل الدخول + شارة طلبات الموظفين على الزر الرئيسى
+  setInterval(function(){
+    try{
+      var ls=document.getElementById('login-screen'),ok=!!(typeof currentUser!=='undefined'&&currentUser&&ls&&ls.style.display==='none');
+      if(ok&&!root.classList.contains('gm-show')){root.classList.add('gm-show');place();}
+      else if(!ok&&root.classList.contains('gm-show')){close();root.classList.remove('gm-show');}
+      var pill=document.getElementById('v92-pill'),n=pill&&pill.querySelector('span')?pill.querySelector('span').textContent:'';
+      mdot.textContent=n;mdot.style.display=(n&&!isOpen)?'flex':'none';
+    }catch(e){}
+  },1000);
+})();
+</script>
+<!-- GOOEY-MENU END -->
 </body>
     </html>
